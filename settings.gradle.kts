@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "BleAndroid"
 include(":app")
+include(":bleclient")
