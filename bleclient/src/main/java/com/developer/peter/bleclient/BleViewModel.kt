@@ -88,7 +88,7 @@ class BleViewModel(
     }
 
     companion object {
-        private val SERVICE_UUID = UUID.fromString("0000feed-0000-1000-8000-00805f9b34fb")
-        private val CHARACTERISTIC_UUID = UUID.fromString("0000beef-0000-1000-8000-00805f9b34fb")
+        private val SERVICE_UUID = UUID.fromString("00001234-0000-1000-8000-00805f9b34fb")
+        private val CHARACTERISTIC_UUID = UUID.fromString("00005678-0000-1000-8000-00805f9b34fb")
     }
 }

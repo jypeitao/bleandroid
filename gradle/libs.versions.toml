@@ -6,6 +6,7 @@ junit = "4.13.2"
 junitVersion = "1.2.1"
 espressoCore = "3.6.1"
 appcompat = "1.7.0"
+kotlinxCoroutinesAndroid = "1.10.1"
 kotlinxCoroutinesTest = "1.8.0"
 material = "1.12.0"
 constraintlayout = "2.2.1"
@@ -16,6 +17,7 @@ activityCompose = "1.10.1"
 composeBom = "2024.09.00"
 rules = "1.6.1"
 runner = "1.6.2"
+runtimeLivedata = "1.8.0"
 truth = "1.4.4"
 truthVersion = "1.6.0"
 
@@ -24,12 +26,14 @@ androidx-core = { module = "androidx.test:core", version.ref = "rules" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-rules = { module = "androidx.test:rules", version.ref = "rules" }
 androidx-runner = { module = "androidx.test:runner", version.ref = "runner" }
+androidx-runtime-livedata = { module = "androidx.compose.runtime:runtime-livedata", version.ref = "runtimeLivedata" }
 androidx-truth = { module = "androidx.test.ext:truth", version.ref = "truthVersion" }
 jetbrains-kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutinesAndroid" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutinesTest" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
