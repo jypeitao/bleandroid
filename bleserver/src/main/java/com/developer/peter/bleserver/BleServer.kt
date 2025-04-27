@@ -1,10 +1,12 @@
 package com.developer.peter.bleserver
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
@@ -24,7 +26,7 @@ import com.developer.peter.bleserver.data.MessageType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import java.util.UUID
+import java.util.Collections
 
 class BleServer(private val context: Context) {
     private val bluetoothManager: BluetoothManager =
@@ -41,6 +43,11 @@ class BleServer(private val context: Context) {
 
     private val serviceUUID = BleServiceConstants.SERVICE_UUID
     private val characteristicUUID = BleServiceConstants.CHARACTERISTIC_UUID
+    private val descriptorUUID = BleServiceConstants.DESCRIPTOR_UUID
+
+    private var currentMtu = 23
+
+    private val notifyingDevices = Collections.synchronizedSet(mutableSetOf<BluetoothDevice>())
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
@@ -53,6 +60,7 @@ class BleServer(private val context: Context) {
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.Disconnected
+                    notifyingDevices.remove(device)
                 }
             }
         }
@@ -77,6 +85,44 @@ class BleServer(private val context: Context) {
                 }
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             }
+        }
+
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+        override fun onDescriptorWriteRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            descriptor: BluetoothGattDescriptor,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray
+        ) {
+            if (descriptor.uuid == descriptorUUID) {
+                when {
+                    value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) -> {
+                        notifyingDevices.add(device)
+                    }
+
+                    value.contentEquals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE) -> {
+                        notifyingDevices.remove(device)
+                    }
+                }
+
+                if (responseNeeded) {
+                    gattServer?.sendResponse(
+                        device,
+                        requestId,
+                        BluetoothGatt.GATT_SUCCESS,
+                        0,
+                        null
+                    )
+                }
+            }
+        }
+
+
+        override fun onMtuChanged(device: BluetoothDevice?, mtu: Int) {
+            currentMtu = mtu
         }
     }
 
@@ -134,15 +180,21 @@ class BleServer(private val context: Context) {
 
         val characteristic = BluetoothGattCharacteristic(
             characteristicUUID,
-            BluetoothGattCharacteristic.PROPERTY_WRITE,
-            BluetoothGattCharacteristic.PERMISSION_WRITE
+            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_WRITE or BluetoothGattCharacteristic.PERMISSION_READ
         )
+        val cccd = BluetoothGattDescriptor(
+            descriptorUUID,
+            BluetoothGattDescriptor.PERMISSION_WRITE or BluetoothGattDescriptor.PERMISSION_READ
+        )
+        characteristic.addDescriptor(cccd)
 
         service.addCharacteristic(characteristic)
         gattServer = bluetoothManager.openGattServer(context, gattServerCallback)
         gattServer?.addService(service)
     }
 
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun sendMessage(message: String) {
         _messages.update { currentList ->
             currentList + BleMessage(
@@ -150,8 +202,49 @@ class BleServer(private val context: Context) {
                 type = MessageType.SENT
             )
         }
-        // 实际发送消息的逻辑
+        sendLargeData(message.toByteArray())
     }
+
+    @SuppressLint("MissingPermission")
+    fun sendLargeData(data: ByteArray) {
+        val characteristic =
+            gattServer?.getService(serviceUUID)?.getCharacteristic(characteristicUUID)
+        val chunkSize = currentMtu - 3 // ATT header 占用 3 字节
+        data.asSequence()
+            .windowed(size = chunkSize, step = chunkSize, partialWindows = true)
+            .map { it.toByteArray() }
+            .forEach { chunk ->
+                sendNotification(characteristic, chunk)
+            }
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private fun sendNotification(
+        characteristic: BluetoothGattCharacteristic?,
+        value: ByteArray
+    ): Boolean {
+        if (notifyingDevices.isEmpty()) {
+            return false
+        }
+
+        var success = true
+        characteristic?.value = value
+
+        // 向所有已订阅通知的设备发送数据
+        synchronized(notifyingDevices) {
+            notifyingDevices.forEach { device ->
+                val notified = gattServer?.notifyCharacteristicChanged(
+                    device,
+                    characteristic,
+                    false
+                ) ?: false
+                success = success && notified
+            }
+        }
+
+        return success
+    }
+
 
     @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
     fun stop() {

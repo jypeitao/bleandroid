@@ -9,6 +9,8 @@ object BleServiceConstants {
     // Characteristic UUID for communication
     val CHARACTERISTIC_UUID: UUID = UUID.fromString("00005678-0000-1000-8000-00805F9B34FB")
 
+    val DESCRIPTOR_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
     // Device name that will be advertised
     const val DEVICE_NAME = "BLE Server"
 
