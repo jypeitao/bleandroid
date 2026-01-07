@@ -18,7 +18,9 @@ import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.os.ParcelUuid
+import android.util.Log
 import androidx.annotation.RequiresPermission
+import androidx.compose.ui.platform.LocalGraphicsContext
 import com.developer.peter.bleserver.data.BleMessage
 import com.developer.peter.bleserver.data.BleServiceConstants
 import com.developer.peter.bleserver.data.ConnectionState
@@ -29,6 +31,8 @@ import kotlinx.coroutines.flow.update
 import java.util.Collections
 
 class BleServer(private val context: Context) {
+
+    private val TAG = BleServer::class.java.simpleName
     private val bluetoothManager: BluetoothManager =
         context.getSystemService(BluetoothManager::class.java)
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
@@ -52,6 +56,7 @@ class BleServer(private val context: Context) {
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
+            Log.d(TAG, "onConnectionStateChange:$newState")
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     stopAdvertising()
@@ -63,6 +68,15 @@ class BleServer(private val context: Context) {
                     notifyingDevices.remove(device)
                 }
             }
+        }
+
+        override fun onNotificationSent(device: BluetoothDevice?, status: Int) {
+            Log.d(TAG, "onNotificationSent:$status")
+        }
+
+        override fun onServiceAdded(status: Int, service: BluetoothGattService?) {
+            super.onServiceAdded(status, service)
+            Log.d(TAG, "onServiceAdded:$status -- $service")
         }
 
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
@@ -83,6 +97,7 @@ class BleServer(private val context: Context) {
                         type = MessageType.RECEIVED
                     )
                 }
+                Log.d(TAG,"onCharacteristicWriteRequest")
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             }
         }
@@ -97,6 +112,7 @@ class BleServer(private val context: Context) {
             offset: Int,
             value: ByteArray
         ) {
+            Log.d(TAG, "onDescriptorWriteRequest")
             if (descriptor.uuid == descriptorUUID) {
                 when {
                     value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) -> {
@@ -134,6 +150,7 @@ class BleServer(private val context: Context) {
     fun startAdvertising() {
         if (_isAdvertising.value) return
 
+        Log.d(TAG, "startAdvertising")
         setupGattServer()
         advertiser = bluetoothAdapter?.bluetoothLeAdvertiser
 
@@ -160,11 +177,13 @@ class BleServer(private val context: Context) {
     private val advertisingCallback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
             super.onStartSuccess(settingsInEffect)
+            Log.d(TAG, "onStartSuccess")
             _isAdvertising.value = true
         }
 
         override fun onStartFailure(errorCode: Int) {
             super.onStartFailure(errorCode)
+            Log.d(TAG, "onStartFailure")
             _isAdvertising.value = false
             // 可以添加错误处理逻辑
         }
@@ -173,6 +192,10 @@ class BleServer(private val context: Context) {
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private fun setupGattServer() {
+        if (gattServer != null) {
+            return
+        }
+
         val service = BluetoothGattService(
             serviceUUID,
             BluetoothGattService.SERVICE_TYPE_PRIMARY

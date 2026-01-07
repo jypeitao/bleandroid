@@ -4,6 +4,7 @@ import android.Manifest
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
+import android.util.Log
 import androidx.annotation.RequiresPermission
 import com.developer.peter.bleclient.data.BleDevice
 import com.developer.peter.bleclient.data.ConnectionState
@@ -22,6 +23,8 @@ import java.util.*
 
 
 class BleManager(private val context: Context) {
+
+    private val TAG = "BleManager"
     private var bluetoothGatt: BluetoothGatt? = null
     private val bluetoothAdapter: BluetoothAdapter? = context.getSystemService(
         BluetoothManager::class.java
@@ -103,14 +106,19 @@ class BleManager(private val context: Context) {
         private fun BluetoothGattCharacteristic.isNotifiable(): Boolean {
             return properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
         }
-
+        val CHARACTERISTIC_UUID: UUID = UUID.fromString("00005678-0000-1000-8000-00805F9B34FB")
+        val SERVICE_UUID: UUID = UUID.fromString("00001234-0000-1000-8000-00805F9B34FB")
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 gatt?.services?.forEach { service ->
-                    service.characteristics.forEach { characteristic ->
-                        if (characteristic.isNotifiable()) {
-                            enableNotification(characteristic)
+                    Log.d(TAG, "onServicesDiscovered:" + service.uuid)
+                    if (SERVICE_UUID == service.uuid) {
+                        service.characteristics.forEach { characteristic ->
+                            Log.d(TAG, "characteristic:" + characteristic.uuid)
+                            if (characteristic.isNotifiable()) {
+                                enableNotification(characteristic)
+                            }
                         }
                     }
                 }
@@ -122,7 +130,9 @@ class BleManager(private val context: Context) {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
+            Log.d(TAG,"onCharacteristicChanged")
             scanScope.launch {
+                Log.d(TAG,"onCharacteristicChanged ==")
                 _receivedData.emit(
                     ReceivedData(
                         characteristicUuid = characteristic.uuid,
@@ -130,6 +140,7 @@ class BleManager(private val context: Context) {
                     )
                 )
             }
+            Log.d(TAG,"onCharacteristicChanged --")
         }
     }
 
@@ -225,6 +236,7 @@ class BleManager(private val context: Context) {
         val gatt = bluetoothGatt ?: return
         gatt.setCharacteristicNotification(characteristic, true)
 
+        Log.d(TAG, "enableNotification")
         val descriptor = characteristic.getDescriptor(
             UUID.fromString(CCCD_UUID)
         ) ?: return
