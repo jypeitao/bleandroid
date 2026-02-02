@@ -26,6 +26,7 @@ class BleManager(private val context: Context) {
 
     private val TAG = "BleManager"
     private var bluetoothGatt: BluetoothGatt? = null
+    private var currentMtu = 23
     private val bluetoothAdapter: BluetoothAdapter? = context.getSystemService(
         BluetoothManager::class.java
     )?.adapter
@@ -41,6 +42,7 @@ class BleManager(private val context: Context) {
 
     private var isScanning = false
     private val scanScope = CoroutineScope(Dispatchers.IO + Job())
+
 
     private val scanCallback = object : ScanCallback() {
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
@@ -99,6 +101,8 @@ class BleManager(private val context: Context) {
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
+                currentMtu = mtu
+                Log.d(TAG, "onMtuChanged: $mtu")
                 gatt?.discoverServices()
             }
         }
@@ -205,19 +209,24 @@ class BleManager(private val context: Context) {
         val service = gatt.getService(serviceUuid) ?: return
         val characteristic = service.getCharacteristic(characteristicUuid) ?: return
 
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            bluetoothGatt?.writeCharacteristic(
-                characteristic,
-                data,
-                characteristic.writeType
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            characteristic.value = data
-            @Suppress("DEPRECATION")
-            bluetoothGatt?.writeCharacteristic(characteristic)
-        }
-
+        val maxPayload = currentMtu - 3
+        data.asSequence()
+            .windowed(size = maxPayload, step = maxPayload, partialWindows = true)
+            .map { it.toByteArray() }
+            .forEach { chunk ->
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    gatt.writeCharacteristic(
+                        characteristic,
+                        chunk,
+                        characteristic.writeType
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    characteristic.value = chunk
+                    @Suppress("DEPRECATION")
+                    gatt.writeCharacteristic(characteristic)
+                }
+            }
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
