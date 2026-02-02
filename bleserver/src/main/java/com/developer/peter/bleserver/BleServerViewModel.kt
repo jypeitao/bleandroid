@@ -18,8 +18,9 @@ class BleServerViewModel(private val application: Application) : AndroidViewMode
     val isAdvertising: StateFlow<Boolean> = bleServer.isAdvertising
 
 
-    fun sendMessage(message: String) {
-        bleServer.sendMessage(message)
+    @SuppressLint("MissingPermission")
+    fun sendMessage(message: String, confirm: Boolean = false) {
+        bleServer.sendMessage(message, confirm)
     }
 
     @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])

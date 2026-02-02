@@ -12,6 +12,7 @@ import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
@@ -25,9 +26,16 @@ import com.developer.peter.bleserver.data.BleMessage
 import com.developer.peter.bleserver.data.BleServiceConstants
 import com.developer.peter.bleserver.data.ConnectionState
 import com.developer.peter.bleserver.data.MessageType
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
 
 class BleServer(private val context: Context) {
@@ -49,7 +57,12 @@ class BleServer(private val context: Context) {
     private val characteristicUUID = BleServiceConstants.CHARACTERISTIC_UUID
     private val descriptorUUID = BleServiceConstants.DESCRIPTOR_UUID
 
+    private val serverScope = CoroutineScope(Dispatchers.IO + Job())
+
     private var currentMtu = 23
+
+    private val notificationMutex = Mutex()
+    private var notificationDeferred: CompletableDeferred<Int>? = null
 
     private val notifyingDevices = Collections.synchronizedSet(mutableSetOf<BluetoothDevice>())
 
@@ -66,12 +79,18 @@ class BleServer(private val context: Context) {
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.Disconnected
                     notifyingDevices.remove(device)
+                    synchronized(this@BleServer) {
+                        notificationDeferred?.complete(BluetoothGatt.GATT_FAILURE)
+                    }
                 }
             }
         }
 
         override fun onNotificationSent(device: BluetoothDevice?, status: Int) {
             Log.d(TAG, "onNotificationSent:$status")
+            synchronized(this@BleServer) {
+                notificationDeferred?.complete(status)
+            }
         }
 
         override fun onServiceAdded(status: Int, service: BluetoothGattService?) {
@@ -218,50 +237,88 @@ class BleServer(private val context: Context) {
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    fun sendMessage(message: String) {
+    fun sendMessage(message: String, confirm: Boolean = false) {
         _messages.update { currentList ->
             currentList + BleMessage(
                 content = message,
                 type = MessageType.SENT
             )
         }
-        sendLargeData(message.toByteArray())
+        sendLargeData(message.toByteArray(), confirm)
     }
 
     @SuppressLint("MissingPermission")
-    fun sendLargeData(data: ByteArray) {
+    fun sendLargeData(data: ByteArray, confirm: Boolean = false) {
         val characteristic =
-            gattServer?.getService(serviceUUID)?.getCharacteristic(characteristicUUID)
+            gattServer?.getService(serviceUUID)?.getCharacteristic(characteristicUUID) ?: return
         val chunkSize = currentMtu - 3 // ATT header 占用 3 字节
-        data.asSequence()
-            .windowed(size = chunkSize, step = chunkSize, partialWindows = true)
-            .map { it.toByteArray() }
-            .forEach { chunk ->
-                sendNotification(characteristic, chunk)
-            }
+        
+        serverScope.launch {
+            data.asSequence()
+                .windowed(size = chunkSize, step = chunkSize, partialWindows = true)
+                .map { it.toByteArray() }
+                .forEach { chunk ->
+                    sendNotification(characteristic, chunk, confirm)
+                }
+        }
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    private fun sendNotification(
+    private suspend fun sendNotification(
         characteristic: BluetoothGattCharacteristic?,
-        value: ByteArray
+        value: ByteArray,
+        confirm: Boolean
     ): Boolean {
-        if (notifyingDevices.isEmpty()) {
+        if (notifyingDevices.isEmpty() || characteristic == null) {
             return false
         }
 
         var success = true
-        characteristic?.value = value
 
-        // 向所有已订阅通知的设备发送数据
-        synchronized(notifyingDevices) {
-            notifyingDevices.forEach { device ->
-                val notified = gattServer?.notifyCharacteristicChanged(
-                    device,
-                    characteristic,
-                    false
-                ) ?: false
+        val devices = synchronized(notifyingDevices) {
+            notifyingDevices.toList()
+        }
+
+        devices.forEach { device ->
+            // 使用 Mutex 确保多个协程调用 sendMessage 时是串行的
+            notificationMutex.lock()
+            try {
+                val deferred = CompletableDeferred<Int>()
+                synchronized(this@BleServer) {
+                    notificationDeferred = deferred
+                }
+
+                val notified = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    gattServer?.notifyCharacteristicChanged(
+                        device,
+                        characteristic,
+                        confirm,
+                        value
+                    ) == BluetoothStatusCodes.SUCCESS
+                } else {
+                    @Suppress("DEPRECATION")
+                    characteristic.value = value
+                    @Suppress("DEPRECATION")
+                    gattServer?.notifyCharacteristicChanged(
+                        device,
+                        characteristic,
+                        confirm
+                    ) ?: false
+                }
+
+                if (notified) {
+                    // 等待回调，设置 1 秒超时以防万一
+                    val status = withTimeoutOrNull(1000) {
+                        deferred.await()
+                    }
+                    if (status == null) {
+                        Log.w(TAG, "Notification timed out for device: ${device.address}")
+                    }
+                }
+
                 success = success && notified
+            } finally {
+                notificationMutex.unlock()
             }
         }
 
@@ -271,6 +328,9 @@ class BleServer(private val context: Context) {
 
     @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
     fun stop() {
+        synchronized(this) {
+            notificationDeferred?.complete(BluetoothGatt.GATT_FAILURE)
+        }
         gattServer?.close()
         advertiser?.stopAdvertising(advertisingCallback)
     }

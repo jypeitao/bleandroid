@@ -9,6 +9,7 @@ import androidx.annotation.RequiresPermission
 import com.developer.peter.bleclient.data.BleDevice
 import com.developer.peter.bleclient.data.ConnectionState
 import com.developer.peter.bleclient.data.ReceivedData
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,8 +20,10 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.*
-
 
 class BleManager(private val context: Context) {
 
@@ -39,6 +42,9 @@ class BleManager(private val context: Context) {
 
     private val _receivedData = MutableSharedFlow<ReceivedData>()
     val receivedData = _receivedData.asSharedFlow()
+
+    private val writeMutex = Mutex()
+    private var writeDeferred: CompletableDeferred<Int>? = null
 
     private var isScanning = false
     private val scanScope = CoroutineScope(Dispatchers.IO + Job())
@@ -79,6 +85,7 @@ class BleManager(private val context: Context) {
                 status != BluetoothGatt.GATT_SUCCESS -> {
                     disconnectGatt()
                     closeGatt()
+                    resetWriteState()
                     _connectionState.value = ConnectionState.Error(
                         "Connection error: $status"
                     )
@@ -93,6 +100,7 @@ class BleManager(private val context: Context) {
 
                 newState == BluetoothProfile.STATE_DISCONNECTED -> {
                     closeGatt()
+                    resetWriteState()
                     _connectionState.value = ConnectionState.Disconnected
                 }
             }
@@ -145,6 +153,24 @@ class BleManager(private val context: Context) {
                 )
             }
             Log.d(TAG,"onCharacteristicChanged --")
+        }
+
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?,
+            status: Int
+        ) {
+            Log.d(TAG, "onCharacteristicWrite status: $status")
+            synchronized(this@BleManager) {
+                writeDeferred?.complete(status)
+            }
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private fun resetWriteState() {
+        synchronized(this) {
+            writeDeferred?.complete(BluetoothGatt.GATT_FAILURE)
         }
     }
 
@@ -209,24 +235,45 @@ class BleManager(private val context: Context) {
         val service = gatt.getService(serviceUuid) ?: return
         val characteristic = service.getCharacteristic(characteristicUuid) ?: return
 
+        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+
         val maxPayload = currentMtu - 3
-        data.asSequence()
-            .windowed(size = maxPayload, step = maxPayload, partialWindows = true)
-            .map { it.toByteArray() }
-            .forEach { chunk ->
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeCharacteristic(
-                        characteristic,
-                        chunk,
-                        characteristic.writeType
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    characteristic.value = chunk
-                    @Suppress("DEPRECATION")
-                    gatt.writeCharacteristic(characteristic)
+        scanScope.launch {
+            data.asSequence()
+                .windowed(size = maxPayload, step = maxPayload, partialWindows = true)
+                .map { it.toByteArray() }
+                .forEach { chunk ->
+                    writeMutex.withLock {
+                        val deferred = CompletableDeferred<Int>()
+                        synchronized(this@BleManager) {
+                            writeDeferred = deferred
+                        }
+
+                        val success = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            gatt.writeCharacteristic(
+                                characteristic,
+                                chunk,
+                                characteristic.writeType
+                            ) == BluetoothStatusCodes.SUCCESS
+                        } else {
+                            @Suppress("DEPRECATION")
+                            characteristic.value = chunk
+                            @Suppress("DEPRECATION")
+                            gatt.writeCharacteristic(characteristic)
+                        }
+
+                        if (success) {
+                            withTimeoutOrNull(1000) {
+                                deferred.await()
+                            }
+                        } else {
+                            synchronized(this@BleManager) {
+                                writeDeferred = null
+                            }
+                        }
+                    }
                 }
-            }
+        }
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
