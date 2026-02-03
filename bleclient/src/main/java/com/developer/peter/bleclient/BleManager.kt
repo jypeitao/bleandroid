@@ -129,6 +129,11 @@ class BleManager(private val context: Context) {
             }
         }
 
+        override fun onServiceChanged(gatt: BluetoothGatt) {
+            super.onServiceChanged(gatt)
+            Log.d(TAG, "onServiceChanged")
+        }
+
         private fun BluetoothGattCharacteristic.isNotifiable(): Boolean {
             return properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
         }
@@ -202,6 +207,7 @@ class BleManager(private val context: Context) {
                     _receiveSpeed.value = receivedBytesInLastSecond
                     sentBytesInLastSecond = 0
                     receivedBytesInLastSecond = 0
+                    Log.d(TAG, "speed: ${_sendSpeed.value}, ${_receiveSpeed.value}")
                 }
             }
         }
@@ -214,13 +220,11 @@ class BleManager(private val context: Context) {
         startSpeedStatistics()
 
         stressTestJob = scanScope.launch {
-            val dummyData = ByteArray(currentMtu - 3) { 0x01.toByte() }
+            val dummyData = ByteArray(currentMtu - 5) { 0x01.toByte() }
             while (_isStressTesting.value) {
-                sendData(serviceUuid, characteristicUuid, dummyData)
-                // 稍微延迟一点点，防止过度占用 CPU，或者由 sendData 内部的 Mutex 控制速度
-                // 由于 sendData 是异步启动的，我们需要一种方式等待它完成
-                // 修改 sendData 为返回 Job 或者直接在这里内联逻辑
-                delay(10) 
+                sendDataInternal(serviceUuid, characteristicUuid, dummyData)
+                // 稍微延迟，防止过度占用 CPU
+                delay(1)
             }
         }
     }
@@ -294,6 +298,13 @@ class BleManager(private val context: Context) {
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun sendData(serviceUuid: UUID, characteristicUuid: UUID, data: ByteArray) {
+        scanScope.launch {
+            sendDataInternal(serviceUuid, characteristicUuid, data)
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private suspend fun sendDataInternal(serviceUuid: UUID, characteristicUuid: UUID, data: ByteArray) {
         val gatt = bluetoothGatt ?: return
         val service = gatt.getService(serviceUuid) ?: return
         val characteristic = service.getCharacteristic(characteristicUuid) ?: return
@@ -301,46 +312,44 @@ class BleManager(private val context: Context) {
         characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
 
         val maxPayload = currentMtu - 5
-        scanScope.launch {
-            data.asSequence()
-                .windowed(size = maxPayload, step = maxPayload, partialWindows = true)
-                .map { it.toByteArray() }
-                .forEach { chunk ->
-                    writeMutex.withLock {
-                        val deferred = CompletableDeferred<Int>()
+        data.asSequence()
+            .windowed(size = maxPayload, step = maxPayload, partialWindows = true)
+            .map { it.toByteArray() }
+            .forEach { chunk ->
+                writeMutex.withLock {
+                    val deferred = CompletableDeferred<Int>()
+                    synchronized(this@BleManager) {
+                        writeDeferred = deferred
+                    }
+
+                    val success = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        Log.d(TAG, "writeCharacteristic: ${chunk.size} -- $currentMtu")
+                        gatt.writeCharacteristic(
+                            characteristic,
+                            chunk,
+                            characteristic.writeType
+                        ) == BluetoothStatusCodes.SUCCESS
+                    } else {
+                        @Suppress("DEPRECATION")
+                        characteristic.value = chunk
+                        @Suppress("DEPRECATION")
+                        gatt.writeCharacteristic(characteristic)
+                    }
+
+                    if (success) {
+                        withTimeoutOrNull(30000) {
+                            deferred.await()
+                        }
                         synchronized(this@BleManager) {
-                            writeDeferred = deferred
+                            sentBytesInLastSecond += chunk.size
                         }
-
-                        val success = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                            Log.d(TAG, "writeCharacteristic: ${chunk.size} -- $currentMtu")
-                            gatt.writeCharacteristic(
-                                characteristic,
-                                chunk,
-                                characteristic.writeType
-                            ) == BluetoothStatusCodes.SUCCESS
-                        } else {
-                            @Suppress("DEPRECATION")
-                            characteristic.value = chunk
-                            @Suppress("DEPRECATION")
-                            gatt.writeCharacteristic(characteristic)
-                        }
-
-                        if (success) {
-                            withTimeoutOrNull(1000) {
-                                deferred.await()
-                            }
-                            synchronized(this@BleManager) {
-                                sentBytesInLastSecond += chunk.size
-                            }
-                        } else {
-                            synchronized(this@BleManager) {
-                                writeDeferred = null
-                            }
+                    } else {
+                        synchronized(this@BleManager) {
+                            writeDeferred = null
                         }
                     }
                 }
-        }
+            }
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)

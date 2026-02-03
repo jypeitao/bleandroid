@@ -17,11 +17,13 @@ import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.ParcelUuid
 import android.util.Log
 import androidx.annotation.RequiresPermission
-import androidx.compose.ui.platform.LocalGraphicsContext
 import com.developer.peter.bleserver.data.BleMessage
 import com.developer.peter.bleserver.data.BleServiceConstants
 import com.developer.peter.bleserver.data.ConnectionState
@@ -80,6 +82,25 @@ class BleServer(private val context: Context) {
     private var notificationDeferred: CompletableDeferred<Int>? = null
 
     private val notifyingDevices = Collections.synchronizedSet(mutableSetOf<BluetoothDevice>())
+
+    private val bluetoothReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                when (state) {
+                    BluetoothAdapter.STATE_ON -> {
+                        Log.d(TAG, "Bluetooth turned ON, initializing GATT server")
+                        setupGattServer()
+                    }
+                    BluetoothAdapter.STATE_OFF -> {
+                        Log.d(TAG, "Bluetooth turned OFF, uninitializing GATT server")
+                        teardownGattServer()
+                    }
+                }
+            }
+        }
+    }
+
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
@@ -220,16 +241,33 @@ class BleServer(private val context: Context) {
         }
     }
 
+    init {
+        // 注册广播接收器以监听蓝牙状态变化
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        context.registerReceiver(bluetoothReceiver, filter)
+
+        // 只有在已经有权限且蓝牙开启的情况下才初始化
+        // 否则，我们将等待 startAdvertising() 调用 ensureInitialized()
+        // 或者等待蓝牙开启广播
+        if (bluetoothAdapter?.isEnabled == true &&
+            com.developer.peter.bleserver.util.BlePermissionHelper.hasRequiredPermissions(context)
+        ) {
+            setupGattServer()
+        }
+    }
+
     // 添加广播状态流
     private val _isAdvertising = MutableStateFlow(false)
     val isAdvertising = _isAdvertising.asStateFlow()
 
-    @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
+    @SuppressLint("MissingPermission")
     fun startAdvertising() {
         if (_isAdvertising.value) return
 
+        // 确保 GATT Server 已在拥有权限的前提下初始化
+        ensureInitialized()
+
         Log.d(TAG, "startAdvertising")
-        setupGattServer()
         advertiser = bluetoothAdapter?.bluetoothLeAdvertiser
 
         val settings = AdvertiseSettings.Builder()
@@ -255,6 +293,7 @@ class BleServer(private val context: Context) {
                     _receiveSpeed.value = receivedBytesInLastSecond
                     sentBytesInLastSecond = 0
                     receivedBytesInLastSecond = 0
+                    Log.d(TAG, "sendSpeed = ${_sendSpeed.value}, receiveSpeed = ${_receiveSpeed.value}")
                 }
             }
         }
@@ -266,10 +305,10 @@ class BleServer(private val context: Context) {
         startSpeedStatistics()
 
         stressTestJob = serverScope.launch {
-            val dummyData = ByteArray(currentMtu - 3) { 0x01.toByte() }
+            val dummyData = ByteArray(currentMtu - 5) { 0x01.toByte() }
             while (_isStressTesting.value) {
                 sendLargeData(dummyData, false)
-                delay(10)
+                delay(1)
             }
         }
     }
@@ -286,11 +325,20 @@ class BleServer(private val context: Context) {
         receivedBytesInLastSecond = 0
     }
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_ADVERTISE)
+    @SuppressLint("MissingPermission")
     fun stopAdvertising() {
         advertiser?.stopAdvertising(advertisingCallback)
         advertiser = null
         _isAdvertising.value = false
+    }
+
+    fun ensureInitialized() {
+        if (gattServer == null &&
+            com.developer.peter.bleserver.util.BlePermissionHelper.hasRequiredPermissions(context) &&
+            bluetoothAdapter?.isEnabled == true
+        ) {
+            setupGattServer()
+        }
     }
 
     private val advertisingCallback = object : AdvertiseCallback() {
@@ -309,9 +357,14 @@ class BleServer(private val context: Context) {
     }
 
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    @SuppressLint("MissingPermission")
     private fun setupGattServer() {
         if (gattServer != null) {
+            return
+        }
+        // 没有运行时权限时直接返回，避免 SecurityException
+        if (!com.developer.peter.bleserver.util.BlePermissionHelper.hasRequiredPermissions(context)) {
+            Log.w(TAG, "Missing BLE permissions. Skip GATT server setup.")
             return
         }
 
@@ -332,11 +385,16 @@ class BleServer(private val context: Context) {
         characteristic.addDescriptor(cccd)
 
         service.addCharacteristic(characteristic)
-        gattServer = bluetoothManager.openGattServer(context, gattServerCallback)
-        gattServer?.addService(service)
+        try {
+            gattServer = bluetoothManager.openGattServer(context, gattServerCallback)
+            gattServer?.addService(service)
+        } catch (se: SecurityException) {
+            Log.e(TAG, "SecurityException opening GATT server. Missing permission?", se)
+            gattServer = null
+        }
     }
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    @SuppressLint("MissingPermission")
     fun sendMessage(message: String, confirm: Boolean = false) {
         _messages.update { currentList ->
             currentList + BleMessage(
@@ -344,38 +402,40 @@ class BleServer(private val context: Context) {
                 type = MessageType.SENT
             )
         }
-        sendLargeData(message.toByteArray(), confirm)
-    }
-
-    @SuppressLint("MissingPermission")
-    fun sendLargeData(data: ByteArray, confirm: Boolean = false) {
-        val characteristic =
-            gattServer?.getService(serviceUUID)?.getCharacteristic(characteristicUUID) ?: return
-        val chunkSize = currentMtu - 5 // ATT header 占用 3 字节
-        
         serverScope.launch {
-            data.asSequence()
-                .windowed(size = chunkSize, step = chunkSize, partialWindows = true)
-                .map { it.toByteArray() }
-                .forEach { chunk ->
-                    sendNotification(characteristic, chunk, confirm)
-                }
+            sendLargeData(message.toByteArray(), confirm)
         }
     }
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    @SuppressLint("MissingPermission")
+    suspend fun sendLargeData(data: ByteArray, confirm: Boolean = false) {
+        val characteristic =
+            gattServer?.getService(serviceUUID)?.getCharacteristic(characteristicUUID) ?: return
+        val chunkSize = currentMtu - 5 // ATT header 占用 3 字节
+        Log.d(TAG, "sendLargeData: chunkSize = ${data.size}")
+        data.asSequence()
+            .windowed(size = chunkSize, step = chunkSize, partialWindows = true)
+            .map { it.toByteArray() }
+            .forEach { chunk ->
+                sendNotification(characteristic, chunk, confirm)
+            }
+    }
+
+    @SuppressLint("MissingPermission")
     private suspend fun sendNotification(
         characteristic: BluetoothGattCharacteristic?,
         value: ByteArray,
         confirm: Boolean
     ): Boolean {
         if (notifyingDevices.isEmpty() || characteristic == null) {
+            Log.w(TAG, "No devices to notify" + notifyingDevices.isEmpty())
             return false
         }
 
         var success = true
 
         val devices = synchronized(notifyingDevices) {
+            Log.d(TAG, "notifyingDevices size = ${notifyingDevices.size}")
             notifyingDevices.toList()
         }
 
@@ -396,6 +456,7 @@ class BleServer(private val context: Context) {
                         value
                     ) == BluetoothStatusCodes.SUCCESS
                 } else {
+                    Log.d(TAG, "notifyCharacteristicChanged: ${device.address}")
                     @Suppress("DEPRECATION")
                     characteristic.value = value
                     @Suppress("DEPRECATION")
@@ -407,17 +468,19 @@ class BleServer(private val context: Context) {
                 }
 
                 if (notified) {
-                    // 等待回调，设置 1 秒超时以防万一
-                    val status = withTimeoutOrNull(1000) {
+                    // 等待回调，设置 20 秒超时以防万一
+                    val status = withTimeoutOrNull(20000) {
                         deferred.await()
                     }
                     if (status == null) {
-                        Log.w(TAG, "Notification timed out for device: ${device.address}")
+                        Log.e(TAG, "Notification timed out for device: ${device.address}")
                     } else if (status == BluetoothGatt.GATT_SUCCESS) {
                         synchronized(this@BleServer) {
                             sentBytesInLastSecond += value.size
                         }
                     }
+                } else {
+                    Log.w(TAG, "Failed to notify device: ${device.address}")
                 }
 
                 success = success && notified
@@ -430,12 +493,29 @@ class BleServer(private val context: Context) {
     }
 
 
-    @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
-    fun stop() {
+    @SuppressLint("MissingPermission")
+    private fun teardownGattServer() {
+        Log.d(TAG, "teardownGattServer")
         synchronized(this) {
             notificationDeferred?.complete(BluetoothGatt.GATT_FAILURE)
+            notificationDeferred = null
         }
         gattServer?.close()
+        gattServer = null
+        notifyingDevices.clear()
+        _isAdvertising.value = false
+        _connectionState.value = ConnectionState.Disconnected
+        stopStressTest()
+    }
+
+    @SuppressLint("MissingPermission")
+    fun stop() {
+        try {
+            context.unregisterReceiver(bluetoothReceiver)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering receiver", e)
+        }
+        teardownGattServer()
         advertiser?.stopAdvertising(advertisingCallback)
     }
 }

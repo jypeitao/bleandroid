@@ -15,8 +15,6 @@ import com.developer.peter.bleserver.ui.theme.BleAndroidTheme
 import com.developer.peter.bleserver.util.BlePermissionHelper
 
 class MainActivity : ComponentActivity() {
-    private val bleServer by lazy { BleServer(this) }
-
     @SuppressLint("MissingPermission")
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -24,8 +22,8 @@ class MainActivity : ComponentActivity() {
         // 检查是否所有必需的权限都被授予
         val allGranted = permissions.entries.all { it.value }
         if (allGranted) {
-            // 所有权限都获得了，可以开始广播
-            bleServer.startAdvertising()
+            // 所有权限都获得了，如果是通过 ToggleAdvertising 触发的，那么 Screen 会响应状态变化
+            // 如果我们需要在这里做某些事情，可以通知 ViewModel
         } else {
             // 显示权限被拒绝的提示
             showPermissionDeniedDialog()

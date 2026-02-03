@@ -6,10 +6,24 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
 
+    <!-- Android 12 以下的权限 -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="30" />
+
     <!-- 声明设备必须支持BLE -->
-    <uses-feature
-        android:name="android.hardware.bluetooth_le"
-        android:required="true" />
+<!--    <uses-feature-->
+<!--        android:name="android.hardware.bluetooth_le"-->
+<!--        android:required="true" />-->
 
     <application
         android:allowBackup="true"

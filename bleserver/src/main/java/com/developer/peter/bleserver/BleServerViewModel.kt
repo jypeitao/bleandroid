@@ -11,15 +11,22 @@ import com.developer.peter.bleserver.util.BlePermissionHelper
 import kotlinx.coroutines.flow.StateFlow
 
 class BleServerViewModel(private val application: Application) : AndroidViewModel(application) {
-    private val bleServer = BleServer(application)
+    private var _bleServer: BleServer? = null
+    private val bleServer: BleServer
+        get() {
+            if (_bleServer == null) {
+                _bleServer = BleServer(application)
+            }
+            return _bleServer!!
+        }
 
-    val connectionState: StateFlow<ConnectionState> = bleServer.connectionState
-    val messages: StateFlow<List<BleMessage>> = bleServer.messages
-    val isAdvertising: StateFlow<Boolean> = bleServer.isAdvertising
+    val connectionState: StateFlow<ConnectionState> by lazy { bleServer.connectionState }
+    val messages: StateFlow<List<BleMessage>> by lazy { bleServer.messages }
+    val isAdvertising: StateFlow<Boolean> by lazy { bleServer.isAdvertising }
 
-    val isStressTesting = bleServer.isStressTesting
-    val sendSpeed = bleServer.sendSpeed
-    val receiveSpeed = bleServer.receiveSpeed
+    val isStressTesting: StateFlow<Boolean> by lazy { bleServer.isStressTesting }
+    val sendSpeed: StateFlow<Long> by lazy { bleServer.sendSpeed }
+    val receiveSpeed: StateFlow<Long> by lazy { bleServer.receiveSpeed }
 
     @SuppressLint("MissingPermission")
     fun sendMessage(message: String, confirm: Boolean = false) {
@@ -60,6 +67,6 @@ class BleServerViewModel(private val application: Application) : AndroidViewMode
     @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
     override fun onCleared() {
         super.onCleared()
-        bleServer.stop()
+        _bleServer?.stop()
     }
 }
