@@ -43,6 +43,20 @@ class BleManager(private val context: Context) {
     private val _receivedData = MutableSharedFlow<ReceivedData>()
     val receivedData = _receivedData.asSharedFlow()
 
+    private val _isStressTesting = MutableStateFlow(false)
+    val isStressTesting = _isStressTesting.asStateFlow()
+
+    private val _sendSpeed = MutableStateFlow(0L) // bytes per second
+    val sendSpeed = _sendSpeed.asStateFlow()
+
+    private val _receiveSpeed = MutableStateFlow(0L) // bytes per second
+    val receiveSpeed = _receiveSpeed.asStateFlow()
+
+    private var sentBytesInLastSecond = 0L
+    private var receivedBytesInLastSecond = 0L
+    private var speedJob: Job? = null
+    private var stressTestJob: Job? = null
+
     private val writeMutex = Mutex()
     private var writeDeferred: CompletableDeferred<Int>? = null
 
@@ -143,6 +157,9 @@ class BleManager(private val context: Context) {
             value: ByteArray
         ) {
             Log.d(TAG,"onCharacteristicChanged")
+            synchronized(this@BleManager) {
+                receivedBytesInLastSecond += value.size
+            }
             scanScope.launch {
                 Log.d(TAG,"onCharacteristicChanged ==")
                 _receivedData.emit(
@@ -169,9 +186,55 @@ class BleManager(private val context: Context) {
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private fun resetWriteState() {
+        stopStressTest()
         synchronized(this) {
             writeDeferred?.complete(BluetoothGatt.GATT_FAILURE)
         }
+    }
+
+    private fun startSpeedStatistics() {
+        speedJob?.cancel()
+        speedJob = scanScope.launch {
+            while (true) {
+                delay(1000)
+                synchronized(this@BleManager) {
+                    _sendSpeed.value = sentBytesInLastSecond
+                    _receiveSpeed.value = receivedBytesInLastSecond
+                    sentBytesInLastSecond = 0
+                    receivedBytesInLastSecond = 0
+                }
+            }
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    fun startStressTest(serviceUuid: UUID, characteristicUuid: UUID) {
+        if (_isStressTesting.value) return
+        _isStressTesting.value = true
+        startSpeedStatistics()
+
+        stressTestJob = scanScope.launch {
+            val dummyData = ByteArray(currentMtu - 3) { 0x01.toByte() }
+            while (_isStressTesting.value) {
+                sendData(serviceUuid, characteristicUuid, dummyData)
+                // 稍微延迟一点点，防止过度占用 CPU，或者由 sendData 内部的 Mutex 控制速度
+                // 由于 sendData 是异步启动的，我们需要一种方式等待它完成
+                // 修改 sendData 为返回 Job 或者直接在这里内联逻辑
+                delay(10) 
+            }
+        }
+    }
+
+    fun stopStressTest() {
+        _isStressTesting.value = false
+        stressTestJob?.cancel()
+        stressTestJob = null
+        speedJob?.cancel()
+        speedJob = null
+        _sendSpeed.value = 0
+        _receiveSpeed.value = 0
+        sentBytesInLastSecond = 0
+        receivedBytesInLastSecond = 0
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
@@ -237,7 +300,7 @@ class BleManager(private val context: Context) {
 
         characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
 
-        val maxPayload = currentMtu - 3
+        val maxPayload = currentMtu - 5
         scanScope.launch {
             data.asSequence()
                 .windowed(size = maxPayload, step = maxPayload, partialWindows = true)
@@ -250,6 +313,7 @@ class BleManager(private val context: Context) {
                         }
 
                         val success = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            Log.d(TAG, "writeCharacteristic: ${chunk.size} -- $currentMtu")
                             gatt.writeCharacteristic(
                                 characteristic,
                                 chunk,
@@ -265,6 +329,9 @@ class BleManager(private val context: Context) {
                         if (success) {
                             withTimeoutOrNull(1000) {
                                 deferred.await()
+                            }
+                            synchronized(this@BleManager) {
+                                sentBytesInLastSecond += chunk.size
                             }
                         } else {
                             synchronized(this@BleManager) {

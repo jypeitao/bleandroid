@@ -17,6 +17,9 @@ class BleServerViewModel(private val application: Application) : AndroidViewMode
     val messages: StateFlow<List<BleMessage>> = bleServer.messages
     val isAdvertising: StateFlow<Boolean> = bleServer.isAdvertising
 
+    val isStressTesting = bleServer.isStressTesting
+    val sendSpeed = bleServer.sendSpeed
+    val receiveSpeed = bleServer.receiveSpeed
 
     @SuppressLint("MissingPermission")
     fun sendMessage(message: String, confirm: Boolean = false) {
@@ -42,6 +45,14 @@ class BleServerViewModel(private val application: Application) : AndroidViewMode
     fun startAdvertising() {
         if (BlePermissionHelper.hasRequiredPermissions(application)) {
             bleServer.startAdvertising()
+        }
+    }
+
+    fun toggleStressTest() {
+        if (isStressTesting.value) {
+            bleServer.stopStressTest()
+        } else {
+            bleServer.startStressTest()
         }
     }
 

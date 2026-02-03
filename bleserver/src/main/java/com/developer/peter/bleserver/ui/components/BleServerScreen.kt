@@ -43,6 +43,9 @@ fun BleServerScreen(
     val isAdvertising by viewModel.isAdvertising.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
     val messages by viewModel.messages.collectAsState()
+    val isStressTesting by viewModel.isStressTesting.collectAsState()
+    val sendSpeed by viewModel.sendSpeed.collectAsState()
+    val receiveSpeed by viewModel.receiveSpeed.collectAsState()
 
     Scaffold(
         topBar = {
@@ -98,11 +101,27 @@ fun BleServerScreen(
             // 显示连接状态
             when (val state = connectionState) {
                 is ConnectionState.Connected -> {
-                    Text(
-                        "Connected to: ${state.deviceAddress}",
-                        modifier = Modifier.padding(16.dp),
-                        color = Color(0xFF4CAF50)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                "Connected to: ${state.deviceAddress}",
+                                color = Color(0xFF4CAF50)
+                            )
+                            Text(
+                                text = "Send: $sendSpeed B/s | Receive: $receiveSpeed B/s",
+                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Button(onClick = { viewModel.toggleStressTest() }) {
+                            Text(if (isStressTesting) "Stop Test" else "Start Test")
+                        }
+                    }
                 }
 
                 is ConnectionState.Disconnected -> {

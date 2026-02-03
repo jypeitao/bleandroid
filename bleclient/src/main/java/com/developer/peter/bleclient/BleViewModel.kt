@@ -31,6 +31,10 @@ class BleViewModel(
     private val _messages = MutableStateFlow<List<BleMessage>>(emptyList())
     val messages = _messages.asStateFlow()
 
+    val isStressTesting = bleManager.isStressTesting
+    val sendSpeed = bleManager.sendSpeed
+    val receiveSpeed = bleManager.receiveSpeed
+
     init {
         viewModelScope.launch {
             receivedData.collect { message ->
@@ -41,6 +45,15 @@ class BleViewModel(
                     )
                 }
             }
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    fun toggleStressTest() {
+        if (isStressTesting.value) {
+            bleManager.stopStressTest()
+        } else {
+            bleManager.startStressTest(SERVICE_UUID, CHARACTERISTIC_UUID)
         }
     }
 

@@ -30,6 +30,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -61,6 +62,20 @@ class BleServer(private val context: Context) {
 
     private var currentMtu = 23
 
+    private val _isStressTesting = MutableStateFlow(false)
+    val isStressTesting = _isStressTesting.asStateFlow()
+
+    private val _sendSpeed = MutableStateFlow(0L) // bytes per second
+    val sendSpeed = _sendSpeed.asStateFlow()
+
+    private val _receiveSpeed = MutableStateFlow(0L) // bytes per second
+    val receiveSpeed = _receiveSpeed.asStateFlow()
+
+    private var sentBytesInLastSecond = 0L
+    private var receivedBytesInLastSecond = 0L
+    private var speedJob: Job? = null
+    private var stressTestJob: Job? = null
+
     private val notificationMutex = Mutex()
     private var notificationDeferred: CompletableDeferred<Int>? = null
 
@@ -79,6 +94,7 @@ class BleServer(private val context: Context) {
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.Disconnected
                     notifyingDevices.remove(device)
+                    stopStressTest()
                     synchronized(this@BleServer) {
                         notificationDeferred?.complete(BluetoothGatt.GATT_FAILURE)
                     }
@@ -99,6 +115,25 @@ class BleServer(private val context: Context) {
         }
 
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+        override fun onCharacteristicReadRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            offset: Int,
+            characteristic: BluetoothGattCharacteristic
+        ) {
+            if (characteristic.uuid == characteristicUUID) {
+                Log.d(TAG, "onCharacteristicReadRequest")
+                gattServer?.sendResponse(
+                    device,
+                    requestId,
+                    BluetoothGatt.GATT_SUCCESS,
+                    offset,
+                    characteristic.value
+                )
+            }
+        }
+
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onCharacteristicWriteRequest(
             device: BluetoothDevice,
             requestId: Int,
@@ -109,7 +144,11 @@ class BleServer(private val context: Context) {
             value: ByteArray
         ) {
             if (characteristic.uuid == characteristicUUID) {
+                synchronized(this@BleServer) {
+                    receivedBytesInLastSecond += value.size
+                }
                 val message = String(value)
+                characteristic.value = value
                 _messages.update { currentList ->
                     currentList + BleMessage(
                         content = message,
@@ -117,8 +156,27 @@ class BleServer(private val context: Context) {
                     )
                 }
                 Log.d(TAG,"onCharacteristicWriteRequest")
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                if (responseNeeded) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                }
             }
+        }
+
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+        override fun onDescriptorReadRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            offset: Int,
+            descriptor: BluetoothGattDescriptor
+        ) {
+            Log.d(TAG, "onDescriptorReadRequest")
+            gattServer?.sendResponse(
+                device,
+                requestId,
+                BluetoothGatt.GATT_SUCCESS,
+                offset,
+                descriptor.value
+            )
         }
 
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
@@ -142,6 +200,7 @@ class BleServer(private val context: Context) {
                         notifyingDevices.remove(device)
                     }
                 }
+                descriptor.value = value
 
                 if (responseNeeded) {
                     gattServer?.sendResponse(
@@ -186,6 +245,47 @@ class BleServer(private val context: Context) {
         advertiser?.startAdvertising(settings, data, advertisingCallback)
     }
 
+    private fun startSpeedStatistics() {
+        speedJob?.cancel()
+        speedJob = serverScope.launch {
+            while (true) {
+                delay(1000)
+                synchronized(this@BleServer) {
+                    _sendSpeed.value = sentBytesInLastSecond
+                    _receiveSpeed.value = receivedBytesInLastSecond
+                    sentBytesInLastSecond = 0
+                    receivedBytesInLastSecond = 0
+                }
+            }
+        }
+    }
+
+    fun startStressTest() {
+        if (_isStressTesting.value) return
+        _isStressTesting.value = true
+        startSpeedStatistics()
+
+        stressTestJob = serverScope.launch {
+            val dummyData = ByteArray(currentMtu - 3) { 0x01.toByte() }
+            while (_isStressTesting.value) {
+                sendLargeData(dummyData, false)
+                delay(10)
+            }
+        }
+    }
+
+    fun stopStressTest() {
+        _isStressTesting.value = false
+        stressTestJob?.cancel()
+        stressTestJob = null
+        speedJob?.cancel()
+        speedJob = null
+        _sendSpeed.value = 0
+        _receiveSpeed.value = 0
+        sentBytesInLastSecond = 0
+        receivedBytesInLastSecond = 0
+    }
+
     @RequiresPermission(Manifest.permission.BLUETOOTH_ADVERTISE)
     fun stopAdvertising() {
         advertiser?.stopAdvertising(advertisingCallback)
@@ -222,8 +322,8 @@ class BleServer(private val context: Context) {
 
         val characteristic = BluetoothGattCharacteristic(
             characteristicUUID,
-            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_WRITE or BluetoothGattCharacteristic.PERMISSION_READ
+            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_READ or BluetoothGattCharacteristic.PERMISSION_WRITE
         )
         val cccd = BluetoothGattDescriptor(
             descriptorUUID,
@@ -251,7 +351,7 @@ class BleServer(private val context: Context) {
     fun sendLargeData(data: ByteArray, confirm: Boolean = false) {
         val characteristic =
             gattServer?.getService(serviceUUID)?.getCharacteristic(characteristicUUID) ?: return
-        val chunkSize = currentMtu - 3 // ATT header 占用 3 字节
+        val chunkSize = currentMtu - 5 // ATT header 占用 3 字节
         
         serverScope.launch {
             data.asSequence()
@@ -313,6 +413,10 @@ class BleServer(private val context: Context) {
                     }
                     if (status == null) {
                         Log.w(TAG, "Notification timed out for device: ${device.address}")
+                    } else if (status == BluetoothGatt.GATT_SUCCESS) {
+                        synchronized(this@BleServer) {
+                            sentBytesInLastSecond += value.size
+                        }
                     }
                 }
 
