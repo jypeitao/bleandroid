@@ -105,7 +105,7 @@ class BleServer(private val context: Context) {
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
-            Log.d(TAG, "onConnectionStateChange:$newState")
+            Log.d(TAG, "onConnectionStateChange status: $status, newState: $newState")
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     stopAdvertising()
@@ -164,17 +164,26 @@ class BleServer(private val context: Context) {
             offset: Int,
             value: ByteArray
         ) {
+            Log.d(TAG,"onCharacteristicWriteRequest22")
             if (characteristic.uuid == characteristicUUID) {
                 synchronized(this@BleServer) {
                     receivedBytesInLastSecond += value.size
                 }
-                val message = String(value)
-                characteristic.value = value
-                _messages.update { currentList ->
-                    currentList + BleMessage(
-                        content = message,
-                        type = MessageType.RECEIVED
-                    )
+
+                if ((value.size >= 3 &&
+                    value[0] == 0x01.toByte() &&
+                    value[1] == 0x01.toByte() &&
+                    value[2] == 0x01.toByte()).not()
+                ) {
+
+                    val message = String(value)
+//                characteristic.value = value
+                    _messages.update { currentList ->
+                        currentList + BleMessage(
+                            content = message,
+                            type = MessageType.RECEIVED
+                        )
+                    }
                 }
                 Log.d(TAG,"onCharacteristicWriteRequest")
                 if (responseNeeded) {
@@ -237,7 +246,24 @@ class BleServer(private val context: Context) {
 
 
         override fun onMtuChanged(device: BluetoothDevice?, mtu: Int) {
+            super.onMtuChanged(device, mtu)
+            Log.d(TAG, "onMtuChanged: $mtu")
             currentMtu = mtu
+        }
+
+        override fun onExecuteWrite(device: BluetoothDevice?, requestId: Int, execute: Boolean) {
+            super.onExecuteWrite(device, requestId, execute)
+            Log.d(TAG, "onExecuteWrite requestId: $requestId, execute: $execute")
+        }
+
+        override fun onPhyUpdate(device: BluetoothDevice?, txPhy: Int, rxPhy: Int, status: Int) {
+            super.onPhyUpdate(device, txPhy, rxPhy, status)
+            Log.d(TAG, "onPhyUpdate txPhy: $txPhy, rxPhy: $rxPhy, status: $status")
+        }
+
+        override fun onPhyRead(device: BluetoothDevice?, txPhy: Int, rxPhy: Int, status: Int) {
+            super.onPhyRead(device, txPhy, rxPhy, status)
+            Log.d(TAG, "onPhyRead txPhy: $txPhy, rxPhy: $rxPhy, status: $status")
         }
     }
 
@@ -307,7 +333,7 @@ class BleServer(private val context: Context) {
         stressTestJob = serverScope.launch {
             val dummyData = ByteArray(currentMtu - 5) { 0x01.toByte() }
             while (_isStressTesting.value) {
-                sendLargeData(dummyData, false)
+                sendLargeData(dummyData, true)
                 delay(1)
             }
         }
@@ -402,6 +428,7 @@ class BleServer(private val context: Context) {
                 type = MessageType.SENT
             )
         }
+        Log.d(TAG, "sendMessage: $message")
         serverScope.launch {
             sendLargeData(message.toByteArray(), confirm)
         }

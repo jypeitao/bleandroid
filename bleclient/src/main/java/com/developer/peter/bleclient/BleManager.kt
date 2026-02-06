@@ -95,11 +95,13 @@ class BleManager(private val context: Context) {
     private val gattCallback = object : BluetoothGattCallback() {
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
+            Log.d(TAG, "onConnectionStateChange status: $status, newState: $newState")
             when {
                 status != BluetoothGatt.GATT_SUCCESS -> {
                     disconnectGatt()
                     closeGatt()
                     resetWriteState()
+                    stopSpeedStatistics()
                     _connectionState.value = ConnectionState.Error(
                         "Connection error: $status"
                     )
@@ -109,12 +111,15 @@ class BleManager(private val context: Context) {
                     _connectionState.value = ConnectionState.Connected(
                         gatt?.device?.address ?: ""
                     )
+                    // 已连接，开始统计速率
+//                    startSpeedStatistics()
                     gatt?.requestMtu(512)
                 }
 
                 newState == BluetoothProfile.STATE_DISCONNECTED -> {
                     closeGatt()
                     resetWriteState()
+                    stopSpeedStatistics()
                     _connectionState.value = ConnectionState.Disconnected
                 }
             }
@@ -137,10 +142,13 @@ class BleManager(private val context: Context) {
         private fun BluetoothGattCharacteristic.isNotifiable(): Boolean {
             return properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
         }
+
         val CHARACTERISTIC_UUID: UUID = UUID.fromString("00005678-0000-1000-8000-00805F9B34FB")
         val SERVICE_UUID: UUID = UUID.fromString("00001234-0000-1000-8000-00805F9B34FB")
+
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
+            Log.d(TAG, "onServicesDiscovered status: $status")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 gatt?.services?.forEach { service ->
                     Log.d(TAG, "onServicesDiscovered:" + service.uuid)
@@ -156,17 +164,49 @@ class BleManager(private val context: Context) {
             }
         }
 
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int
+        ) {
+            super.onCharacteristicRead(gatt, characteristic, value, status)
+            Log.d(TAG, "onCharacteristicRead status: $status, uuid: ${characteristic.uuid}")
+        }
+
+        @Suppress("DEPRECATION")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?,
+            status: Int
+        ) {
+            super.onCharacteristicRead(gatt, characteristic, status)
+            Log.d(
+                TAG,
+                "onCharacteristicRead (deprecated) status: $status, uuid: ${characteristic?.uuid}"
+            )
+        }
+
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            Log.d(TAG,"onCharacteristicChanged")
+            Log.d(TAG, "onCharacteristicChanged uuid: ${characteristic.uuid}, size: ${value.size}")
             synchronized(this@BleManager) {
                 receivedBytesInLastSecond += value.size
             }
+
+            if (value.size >= 3 &&
+                value[0] == 0x01.toByte() &&
+                value[1] == 0x01.toByte() &&
+                value[2] == 0x01.toByte()
+            ) {
+                return
+            }
+
             scanScope.launch {
-                Log.d(TAG,"onCharacteristicChanged ==")
+                Log.d(TAG, "onCharacteristicChanged ==")
                 _receivedData.emit(
                     ReceivedData(
                         characteristicUuid = characteristic.uuid,
@@ -174,18 +214,67 @@ class BleManager(private val context: Context) {
                     )
                 )
             }
-            Log.d(TAG,"onCharacteristicChanged --")
+            Log.d(TAG, "onCharacteristicChanged --")
+        }
+
+        override fun onDescriptorRead(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int,
+            value: ByteArray
+        ) {
+            super.onDescriptorRead(gatt, descriptor, status, value)
+            Log.d(TAG, "onDescriptorRead status: $status, uuid: ${descriptor.uuid}")
+        }
+
+        @Suppress("DEPRECATION")
+        override fun onDescriptorRead(
+            gatt: BluetoothGatt?,
+            descriptor: BluetoothGattDescriptor?,
+            status: Int
+        ) {
+            super.onDescriptorRead(gatt, descriptor, status)
+            Log.d(TAG, "onDescriptorRead (deprecated) status: $status, uuid: ${descriptor?.uuid}")
+        }
+
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt?,
+            descriptor: BluetoothGattDescriptor?,
+            status: Int
+        ) {
+            super.onDescriptorWrite(gatt, descriptor, status)
+            Log.d(TAG, "onDescriptorWrite status: $status, uuid: ${descriptor?.uuid}")
         }
 
         override fun onCharacteristicWrite(
-            gatt: BluetoothGatt?,
-            characteristic: BluetoothGattCharacteristic?,
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
             status: Int
         ) {
-            Log.d(TAG, "onCharacteristicWrite status: $status")
+            Log.d(TAG, "onCharacteristicWrite status: $status, uuid: ${characteristic.uuid}")
             synchronized(this@BleManager) {
                 writeDeferred?.complete(status)
             }
+        }
+
+        override fun onReliableWriteCompleted(gatt: BluetoothGatt?, status: Int) {
+            super.onReliableWriteCompleted(gatt, status)
+            Log.d(TAG, "onReliableWriteCompleted status: $status")
+        }
+
+        override fun onReadRemoteRssi(gatt: BluetoothGatt?, rssi: Int, status: Int) {
+            super.onReadRemoteRssi(gatt, rssi, status)
+            Log.d(TAG, "onReadRemoteRssi rssi: $rssi, status: $status")
+        }
+
+        override fun onPhyUpdate(gatt: BluetoothGatt?, txPhy: Int, rxPhy: Int, status: Int) {
+            super.onPhyUpdate(gatt, txPhy, rxPhy, status)
+            Log.d(TAG, "onPhyUpdate txPhy: $txPhy, rxPhy: $rxPhy, status: $status")
+        }
+
+        override fun onPhyRead(gatt: BluetoothGatt?, txPhy: Int, rxPhy: Int, status: Int) {
+            super.onPhyRead(gatt, txPhy, rxPhy, status)
+            Log.d(TAG, "onPhyRead txPhy: $txPhy, rxPhy: $rxPhy, status: $status")
         }
     }
 
@@ -218,13 +307,15 @@ class BleManager(private val context: Context) {
         if (_isStressTesting.value) return
         _isStressTesting.value = true
         startSpeedStatistics()
-
+        Log.d(TAG, "startStressTest")
         stressTestJob = scanScope.launch {
             val dummyData = ByteArray(currentMtu - 5) { 0x01.toByte() }
             while (_isStressTesting.value) {
+                Log.d(TAG, "send dummyData")
                 sendDataInternal(serviceUuid, characteristicUuid, dummyData)
                 // 稍微延迟，防止过度占用 CPU
                 delay(1)
+
             }
         }
     }
@@ -233,6 +324,9 @@ class BleManager(private val context: Context) {
         _isStressTesting.value = false
         stressTestJob?.cancel()
         stressTestJob = null
+    }
+
+    private fun stopSpeedStatistics() {
         speedJob?.cancel()
         speedJob = null
         _sendSpeed.value = 0
@@ -304,45 +398,58 @@ class BleManager(private val context: Context) {
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    private suspend fun sendDataInternal(serviceUuid: UUID, characteristicUuid: UUID, data: ByteArray) {
+    private suspend fun sendDataInternal(
+        serviceUuid: UUID,
+        characteristicUuid: UUID,
+        data: ByteArray
+    ) {
         val gatt = bluetoothGatt ?: return
         val service = gatt.getService(serviceUuid) ?: return
         val characteristic = service.getCharacteristic(characteristicUuid) ?: return
 
         characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
 
+        Log.d(TAG, "sendDataInternal: ${data.size}")
         val maxPayload = currentMtu - 5
         data.asSequence()
             .windowed(size = maxPayload, step = maxPayload, partialWindows = true)
             .map { it.toByteArray() }
             .forEach { chunk ->
+                Log.d(TAG, "sendDataInternal forEach chunk: ${chunk.size}")
                 writeMutex.withLock {
+                    Log.d(TAG, "sendDataInternal forEach chunk ff")
                     val deferred = CompletableDeferred<Int>()
                     synchronized(this@BleManager) {
                         writeDeferred = deferred
                     }
 
-                    val success = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                        Log.d(TAG, "writeCharacteristic: ${chunk.size} -- $currentMtu")
-                        gatt.writeCharacteristic(
-                            characteristic,
-                            chunk,
-                            characteristic.writeType
-                        ) == BluetoothStatusCodes.SUCCESS
-                    } else {
-                        @Suppress("DEPRECATION")
-                        characteristic.value = chunk
-                        @Suppress("DEPRECATION")
-                        gatt.writeCharacteristic(characteristic)
-                    }
+                    val success =
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            Log.d(TAG, "write to remote: ${chunk.size} -- $currentMtu")
+                            gatt.writeCharacteristic(
+                                characteristic,
+                                chunk,
+                                characteristic.writeType
+                            ) == BluetoothStatusCodes.SUCCESS
+                        } else {
+                            Log.d(TAG, "write to remote: ${chunk.size} -- $currentMtu")
+                            @Suppress("DEPRECATION")
+                            characteristic.value = chunk
+                            @Suppress("DEPRECATION")
+                            gatt.writeCharacteristic(characteristic)
+                        }
 
                     if (success) {
+                        Log.d(TAG, "deferred +++11")
                         withTimeoutOrNull(30000) {
+                            Log.d(TAG, "deferred +++")
                             deferred.await()
+                            Log.d(TAG, "deferred ---")
                         }
                         synchronized(this@BleManager) {
                             sentBytesInLastSecond += chunk.size
                         }
+                        Log.d(TAG, "deferred ---11")
                     } else {
                         synchronized(this@BleManager) {
                             writeDeferred = null
