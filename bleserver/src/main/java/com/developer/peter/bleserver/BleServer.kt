@@ -105,7 +105,7 @@ class BleServer(private val context: Context) {
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
-            Log.d(TAG, "onConnectionStateChange status: $status, newState: $newState")
+            Log.d(TAG, "onConnectionStateChange status: $status, newState: $newState dev: ${device.name}")
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     stopAdvertising()
@@ -189,6 +189,12 @@ class BleServer(private val context: Context) {
                 if (responseNeeded) {
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                 }
+            } else {
+                val message = String(value)
+                Log.d(TAG, "onCharacteristicWriteRequest2:$message")
+                if (responseNeeded) {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                }
             }
         }
 
@@ -267,6 +273,10 @@ class BleServer(private val context: Context) {
         }
     }
 
+    // 添加广播状态流
+    private val _isAdvertising = MutableStateFlow(false)
+    val isAdvertising = _isAdvertising.asStateFlow()
+
     init {
         // 注册广播接收器以监听蓝牙状态变化
         val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
@@ -281,10 +291,6 @@ class BleServer(private val context: Context) {
             setupGattServer()
         }
     }
-
-    // 添加广播状态流
-    private val _isAdvertising = MutableStateFlow(false)
-    val isAdvertising = _isAdvertising.asStateFlow()
 
     @SuppressLint("MissingPermission")
     fun startAdvertising() {
@@ -353,6 +359,7 @@ class BleServer(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun stopAdvertising() {
+        Log.d(TAG, "stopAdvertising")
         advertiser?.stopAdvertising(advertisingCallback)
         advertiser = null
         _isAdvertising.value = false
@@ -411,6 +418,14 @@ class BleServer(private val context: Context) {
         characteristic.addDescriptor(cccd)
 
         service.addCharacteristic(characteristic)
+
+        val characteristic2 = BluetoothGattCharacteristic(
+            BleServiceConstants.CHARACTERISTIC_UUID2,
+            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED_MITM or BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED_MITM
+        )
+        service.addCharacteristic(characteristic2)
+
         try {
             gattServer = bluetoothManager.openGattServer(context, gattServerCallback)
             gattServer?.addService(service)
