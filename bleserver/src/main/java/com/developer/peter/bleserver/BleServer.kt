@@ -101,11 +101,63 @@ class BleServer(private val context: Context) {
         }
     }
 
+    @SuppressLint("MissingPermission")
+    fun printBluetoothDevice(dev: BluetoothDevice) {
+        Log.d(TAG, "========== BluetoothDevice Info ==========")
+
+        // Device name (requires BLUETOOTH_CONNECT permission)
+        try {
+            Log.d(TAG, "Device Name: ${dev.name ?: "N/A"}")
+        } catch (e: SecurityException) {
+            Log.d(TAG, "Device Name: [Permission Required]")
+        }
+
+        // Device address
+        Log.d(TAG, "Device Address: ${dev.address}")
+
+        // Bond state
+        val bondState = when (dev.bondState) {
+            BluetoothDevice.BOND_NONE -> "BOND_NONE"
+            BluetoothDevice.BOND_BONDING -> "BOND_BONDING"
+            BluetoothDevice.BOND_BONDED -> "BOND_BONDED"
+            else -> "UNKNOWN"
+        }
+        Log.d(TAG, "Bond State: $bondState (${dev.bondState})")
+
+        // Device type
+        val deviceType = when (dev.type) {
+            BluetoothDevice.DEVICE_TYPE_CLASSIC -> "CLASSIC"
+            BluetoothDevice.DEVICE_TYPE_LE -> "LE"
+            BluetoothDevice.DEVICE_TYPE_DUAL -> "DUAL"
+            BluetoothDevice.DEVICE_TYPE_UNKNOWN -> "UNKNOWN"
+            else -> "UNDEFINED"
+        }
+        Log.d(TAG, "Device Type: $deviceType (${dev.type})")
+
+        // UUIDs (requires BLUETOOTH_CONNECT permission)
+        try {
+            val uuids = dev.uuids
+            if (uuids != null && uuids.isNotEmpty()) {
+                Log.d(TAG, "UUIDs:")
+                uuids.forEachIndexed { index, parcelUuid ->
+                    Log.d(TAG, "  [$index] ${parcelUuid.uuid}")
+                }
+            } else {
+                Log.d(TAG, "UUIDs: None")
+            }
+        } catch (e: SecurityException) {
+            Log.d(TAG, "UUIDs: [Permission Required]")
+        }
+
+        Log.d(TAG, "==========================================")
+    }
+
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         @RequiresPermission(allOf = [Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT])
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             Log.d(TAG, "onConnectionStateChange status: $status, newState: $newState dev: ${device.name}")
+            printBluetoothDevice(device)
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     stopAdvertising()
@@ -186,12 +238,14 @@ class BleServer(private val context: Context) {
                     }
                 }
                 Log.d(TAG,"onCharacteristicWriteRequest")
+                printBluetoothDevice(device)
                 if (responseNeeded) {
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                 }
             } else {
                 val message = String(value)
                 Log.d(TAG, "onCharacteristicWriteRequest2:$message")
+                printBluetoothDevice(device)
                 if (responseNeeded) {
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                 }
