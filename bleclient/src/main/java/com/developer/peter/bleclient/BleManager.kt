@@ -172,6 +172,16 @@ class BleManager(private val context: Context) {
         ) {
             super.onCharacteristicRead(gatt, characteristic, value, status)
             Log.d(TAG, "onCharacteristicRead status: $status, uuid: ${characteristic.uuid}")
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                scanScope.launch {
+                    _receivedData.emit(
+                        ReceivedData(
+                            characteristicUuid = characteristic.uuid,
+                            data = value
+                        )
+                    )
+                }
+            }
         }
 
         @Suppress("DEPRECATION")
@@ -185,6 +195,17 @@ class BleManager(private val context: Context) {
                 TAG,
                 "onCharacteristicRead (deprecated) status: $status, uuid: ${characteristic?.uuid}"
             )
+            if (status == BluetoothGatt.GATT_SUCCESS && characteristic != null) {
+                val value = characteristic.value ?: byteArrayOf()
+                scanScope.launch {
+                    _receivedData.emit(
+                        ReceivedData(
+                            characteristicUuid = characteristic.uuid,
+                            data = value
+                        )
+                    )
+                }
+            }
         }
 
         override fun onCharacteristicChanged(
@@ -388,6 +409,16 @@ class BleManager(private val context: Context) {
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun disconnect() {
         disconnectGatt()
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    fun readCharacteristic(serviceUuid: UUID, characteristicUuid: UUID) {
+        val gatt = bluetoothGatt ?: return
+        val service = gatt.getService(serviceUuid) ?: return
+        val characteristic = service.getCharacteristic(characteristicUuid) ?: return
+
+        Log.d(TAG, "readCharacteristic: $characteristicUuid")
+        gatt.readCharacteristic(characteristic)
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)

@@ -89,6 +89,7 @@ fun BleScreen(
                     sendSpeed = sendSpeed,
                     receiveSpeed = receiveSpeed,
                     onToggleStressTest = viewModel::toggleStressTest,
+                    onReadCharacteristic2 = viewModel::readCharacteristic2,
                     modifier = Modifier.padding(padding)
                 )
             }
@@ -181,6 +182,7 @@ private fun ChatScreen(
     sendSpeed: Long,
     receiveSpeed: Long,
     onToggleStressTest: () -> Unit,
+    onReadCharacteristic2: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var messageText by remember { mutableStateOf("") }
@@ -206,8 +208,16 @@ private fun ChatScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            Button(onClick = onToggleStressTest) {
-                Text(if (isStressTesting) "Stop Stress Test" else "Start Stress Test")
+            Row {
+                Button(
+                    onClick = onReadCharacteristic2,
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Text("Read C2")
+                }
+                Button(onClick = onToggleStressTest) {
+                    Text(if (isStressTesting) "Stop Stress Test" else "Start Stress Test")
+                }
             }
         }
 

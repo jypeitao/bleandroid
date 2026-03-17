@@ -79,6 +79,14 @@ class BleViewModel(
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    fun readCharacteristic2() {
+        bleManager.readCharacteristic(
+            SERVICE_UUID,
+            CHARACTERISTIC_UUID2
+        )
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun sendMessage(message: String) {
         bleManager.sendData(
             SERVICE_UUID,
@@ -103,5 +111,6 @@ class BleViewModel(
     companion object {
         private val SERVICE_UUID = UUID.fromString("00001234-0000-1000-8000-00805f9b34fb")
         private val CHARACTERISTIC_UUID = UUID.fromString("00005678-0000-1000-8000-00805f9b34fb")
+        private val CHARACTERISTIC_UUID2 = UUID.fromString("00007788-0000-1000-8000-00805f9b34fb")
     }
 }

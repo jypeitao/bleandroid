@@ -194,16 +194,14 @@ class BleServer(private val context: Context) {
             offset: Int,
             characteristic: BluetoothGattCharacteristic
         ) {
-            if (characteristic.uuid == characteristicUUID) {
-                Log.d(TAG, "onCharacteristicReadRequest")
-                gattServer?.sendResponse(
-                    device,
-                    requestId,
-                    BluetoothGatt.GATT_SUCCESS,
-                    offset,
-                    characteristic.value
-                )
-            }
+            Log.d(TAG, "onCharacteristicReadRequest: ${characteristic.uuid}")
+            gattServer?.sendResponse(
+                device,
+                requestId,
+                BluetoothGatt.GATT_SUCCESS,
+                offset,
+                characteristic.value
+            )
         }
 
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
@@ -478,6 +476,7 @@ class BleServer(private val context: Context) {
             BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_WRITE,
             BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED_MITM or BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED_MITM
         )
+        characteristic2.value = "Hello from C2".toByteArray()
         service.addCharacteristic(characteristic2)
 
         try {
