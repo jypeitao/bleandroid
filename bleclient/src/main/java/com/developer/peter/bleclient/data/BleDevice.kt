@@ -8,6 +8,8 @@ import androidx.annotation.RequiresPermission
 data class BleDevice(
     val device: BluetoothDevice,
     val rssi: Int,
+    val isConnectable: Boolean = false,
+    val isLegacy: Boolean = true,
     val scanRecord: ScanRecord? = null,
     val timestamp: Long = System.currentTimeMillis()
 ) {

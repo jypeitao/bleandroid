@@ -75,6 +75,8 @@ class BleManager(private val context: Context) {
             val bleDevice = BleDevice(
                 device = result.device,
                 rssi = result.rssi,
+                isConnectable = result.isConnectable,
+                isLegacy = result.isLegacy,
                 scanRecord = result.scanRecord
             )
 

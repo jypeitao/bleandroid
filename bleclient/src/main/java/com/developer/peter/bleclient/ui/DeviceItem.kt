@@ -37,6 +37,11 @@ fun DeviceItem(
                     text = device.address,
                     style = MaterialTheme.typography.bodyMedium
                 )
+                Text(
+                    text = "Type: ${if (device.isLegacy) "Legacy" else "Extended"} | ${if (device.isConnectable) "Connectable" else "Non-connectable"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 if (device.serviceUuids.isNotEmpty()) {
                     Text(
                         text = "Services: ${device.serviceUuids.joinToString(", ")}",
