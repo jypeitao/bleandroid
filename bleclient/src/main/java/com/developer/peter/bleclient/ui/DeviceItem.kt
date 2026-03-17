@@ -37,6 +37,20 @@ fun DeviceItem(
                     text = device.address,
                     style = MaterialTheme.typography.bodyMedium
                 )
+                if (device.serviceUuids.isNotEmpty()) {
+                    Text(
+                        text = "Services: ${device.serviceUuids.joinToString(", ")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                if (device.manufacturerData.isNotEmpty()) {
+                    Text(
+                        text = "Manufacturer Data:\n${device.manufacturerData}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
             }
             
             Text(

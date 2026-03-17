@@ -75,7 +75,7 @@ class BleManager(private val context: Context) {
             val bleDevice = BleDevice(
                 device = result.device,
                 rssi = result.rssi,
-                scanRecord = result.scanRecord?.bytes
+                scanRecord = result.scanRecord
             )
 
             _scanResults.update { currentList ->
