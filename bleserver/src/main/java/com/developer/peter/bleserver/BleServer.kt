@@ -28,6 +28,7 @@ import com.developer.peter.bleserver.data.BleMessage
 import com.developer.peter.bleserver.data.BleServiceConstants
 import com.developer.peter.bleserver.data.ConnectionState
 import com.developer.peter.bleserver.data.MessageType
+import com.developer.peter.bleserver.util.BleUtils
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
+import java.util.UUID
 
 class BleServer(private val context: Context) {
 
@@ -344,6 +346,19 @@ class BleServer(private val context: Context) {
         }
     }
 
+    private fun buildSpecificData(mac: String, productId: Int, paired: Boolean): ByteArray {
+        val macBytes = BleUtils.macToBytes(mac)
+        val p = if (paired) 0x01.toByte() else 0x00.toByte()
+        
+        // 构建 9 字节数据: 6 字节 MAC + 2 字节 productId + 1 字节 paired
+        val result = ByteArray(9)
+        System.arraycopy(macBytes, 0, result, 0, 6)
+        result[6] = (productId shr 8).toByte()
+        result[7] = (productId and 0xFF).toByte()
+        result[8] = p
+        return result
+    }
+
     @SuppressLint("MissingPermission")
     fun startAdvertising() {
         if (_isAdvertising.value) return
@@ -356,15 +371,22 @@ class BleServer(private val context: Context) {
 
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
             .setConnectable(true)
             .build()
 
         val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(true)
-            .addServiceUuid(ParcelUuid(serviceUUID))
+//            .setIncludeDeviceName(true)
+            .addServiceUuid(ParcelUuid(UUID.fromString("00000f09-0000-1000-8000-00805f9b34fb")))
+            .addManufacturerData(0x4D4C, buildSpecificData("112233445566", 2, false))
             .build()
 
-        advertiser?.startAdvertising(settings, data, advertisingCallback)
+        val scanRsp = AdvertiseData.Builder()
+            .setIncludeDeviceName(true)
+            .addServiceUuid(ParcelUuid(UUID.fromString("00000f09-0000-1000-8000-00805f9b34fb")))
+            .build()
+
+        advertiser?.startAdvertising(settings, data, scanRsp, advertisingCallback)
     }
 
     private fun startSpeedStatistics() {
