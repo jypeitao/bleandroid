@@ -129,6 +129,33 @@ class BatteryServer(private val context: Context) {
         }
     }
 
+    private val batteryReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) {
+            if (intent?.action == android.content.Intent.ACTION_BATTERY_CHANGED) {
+                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                val batteryPct = if (level != -1 && scale != -1) {
+                    (level * 100 / scale.toFloat()).toInt()
+                } else {
+                    0
+                }
+
+                // 获取电流（如果有）
+                val batteryManager = context?.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                val currentNowMicro = batteryManager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: 0L
+                val currentNowMa = (currentNowMicro / 1000).toInt()
+
+                Log.d(TAG, "Battery Changed: $batteryPct%, Current: $currentNowMa mA")
+
+                if (currentNowMa != _currentMa.value || batteryPct != _currentBatteryLevel.value) {
+                    _currentMa.value = currentNowMa
+                    _currentBatteryLevel.value = batteryPct
+                    updateCharacteristic(currentNowMa)
+                }
+            }
+        }
+    }
+
     private val bluetoothReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
             if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
@@ -148,8 +175,11 @@ class BatteryServer(private val context: Context) {
     }
 
     init {
-        val filter = android.content.IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
-        context.registerReceiver(bluetoothReceiver, filter)
+        val bluetoothFilter = android.content.IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        context.registerReceiver(bluetoothReceiver, bluetoothFilter)
+        
+        val batteryFilter = android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+        context.registerReceiver(batteryReceiver, batteryFilter)
     }
 
     @SuppressLint("MissingPermission")
@@ -215,25 +245,17 @@ class BatteryServer(private val context: Context) {
     }
 
     private fun startBatteryMonitoring() {
-        batteryMonitorJob?.cancel()
-        batteryMonitorJob = serverScope.launch {
-            val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-            while (isActive) {
-                // Get current in microamperes, convert to milliamperes
-                val currentNowMicro = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-                val currentNowMa = (currentNowMicro / 1000).toInt()
-                
-                // Also get battery percentage for standard compliance if needed
-                val level = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        // Now using batteryReceiver for updates, but we can still perform an initial check
+        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val currentNowMicro = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+        val currentNowMa = (currentNowMicro / 1000).toInt()
+        val level = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
 
-                if (currentNowMa != _currentMa.value) {
-                    _currentMa.value = currentNowMa
-                    _currentBatteryLevel.value = level
-                    updateCharacteristic(currentNowMa)
-                }
-                delay(1000) // Poll every second
-            }
-        }
+        _currentMa.value = currentNowMa
+        _currentBatteryLevel.value = level
+        updateCharacteristic(currentNowMa)
+        
+        Log.d(TAG, "Initial battery state: $level%, $currentNowMa mA")
     }
 
     @SuppressLint("MissingPermission")
@@ -286,6 +308,11 @@ class BatteryServer(private val context: Context) {
             context.unregisterReceiver(bluetoothReceiver)
         } catch (e: Exception) {
             // Already unregistered or context issues
+        }
+        try {
+            context.unregisterReceiver(batteryReceiver)
+        } catch (e: Exception) {
+            // Already unregistered
         }
         stopServerInternal()
     }
