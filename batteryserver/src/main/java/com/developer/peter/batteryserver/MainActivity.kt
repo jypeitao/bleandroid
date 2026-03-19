@@ -31,6 +31,8 @@ class MainActivity : ComponentActivity() {
         
         if (!BlePermissionHelper.hasRequiredPermissions(this)) {
             requestPermissionLauncher.launch(BlePermissionHelper.permissions)
+        } else {
+            // Already have permissions, ViewModel init will start service
         }
 
         setContent {

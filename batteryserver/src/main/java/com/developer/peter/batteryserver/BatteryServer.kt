@@ -121,10 +121,38 @@ class BatteryServer(private val context: Context) {
         }
     }
 
+    private val bluetoothReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) {
+            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                when (state) {
+                    BluetoothAdapter.STATE_ON -> {
+                        Log.d(TAG, "Bluetooth ON, restarting server")
+                        startServer()
+                    }
+                    BluetoothAdapter.STATE_OFF -> {
+                        Log.d(TAG, "Bluetooth OFF, stopping server")
+                        stopServerInternal()
+                    }
+                }
+            }
+        }
+    }
+
+    init {
+        val filter = android.content.IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        context.registerReceiver(bluetoothReceiver, filter)
+    }
+
     @SuppressLint("MissingPermission")
     fun startServer() {
         if (!BlePermissionHelper.hasRequiredPermissions(context)) {
             Log.e(TAG, "Missing permissions for BLE server")
+            return
+        }
+        
+        if (bluetoothAdapter?.isEnabled != true) {
+            Log.w(TAG, "Bluetooth is disabled, cannot start server")
             return
         }
 
@@ -215,12 +243,15 @@ class BatteryServer(private val context: Context) {
         Log.d(TAG, "Updated characteristic with current: $currentMa mA, notified ${subscribedDevices.size} devices")
     }
 
-    @SuppressLint("MissingPermission")
-    fun stopServer() {
+    private fun stopServerInternal() {
         batteryMonitorJob?.cancel()
         batteryMonitorJob = null
         
-        advertiser?.stopAdvertising(advertisingCallback)
+        try {
+            advertiser?.stopAdvertising(advertisingCallback)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping advertising", e)
+        }
         advertiser = null
         _isAdvertising.value = false
         
@@ -229,5 +260,15 @@ class BatteryServer(private val context: Context) {
         
         subscribedDevices.clear()
         _connectionState.value = ConnectionState.Disconnected
+    }
+
+    @SuppressLint("MissingPermission")
+    fun stopServer() {
+        try {
+            context.unregisterReceiver(bluetoothReceiver)
+        } catch (e: Exception) {
+            // Already unregistered or context issues
+        }
+        stopServerInternal()
     }
 }
