@@ -45,12 +45,20 @@ class MainActivity : ComponentActivity() {
                     val connectionState by viewModel.connectionState.collectAsState()
                     val currentBatteryLevel by viewModel.currentBatteryLevel.collectAsState()
                     val currentMa by viewModel.currentMa.collectAsState()
+                    val currentAvgMa by viewModel.currentAvgMa.collectAsState()
+                    val chargeCounter by viewModel.chargeCounter.collectAsState()
+                    val energyCounter by viewModel.energyCounter.collectAsState()
+                    val batteryStatus by viewModel.batteryStatus.collectAsState()
 
                     BatteryServerScreen(
                         isAdvertising = isAdvertising,
                         connectionState = connectionState,
                         currentBatteryLevel = currentBatteryLevel,
                         currentMa = currentMa,
+                        currentAvgMa = currentAvgMa,
+                        chargeCounter = chargeCounter,
+                        energyCounter = energyCounter,
+                        batteryStatus = batteryStatus,
                         onToggleServer = {
                             if (BlePermissionHelper.hasRequiredPermissions(this)) {
                                 viewModel.toggleServer()

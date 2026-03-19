@@ -25,6 +25,18 @@ class BatteryServerViewModel(application: Application) : AndroidViewModel(applic
     private val _currentMa = MutableStateFlow(0)
     val currentMa = _currentMa.asStateFlow()
     
+    private val _currentAvgMa = MutableStateFlow(0)
+    val currentAvgMa = _currentAvgMa.asStateFlow()
+    
+    private val _chargeCounter = MutableStateFlow(0)
+    val chargeCounter = _chargeCounter.asStateFlow()
+    
+    private val _energyCounter = MutableStateFlow(0L)
+    val energyCounter = _energyCounter.asStateFlow()
+    
+    private val _batteryStatus = MutableStateFlow(android.os.BatteryManager.BATTERY_STATUS_UNKNOWN)
+    val batteryStatus = _batteryStatus.asStateFlow()
+    
     private val _isAdvertising = MutableStateFlow(false)
     val isAdvertising = _isAdvertising.asStateFlow()
 
@@ -46,6 +58,18 @@ class BatteryServerViewModel(application: Application) : AndroidViewModel(applic
             }
             viewModelScope.launch {
                 server.currentMa.collect { _currentMa.value = it }
+            }
+            viewModelScope.launch {
+                server.currentAvgMa.collect { _currentAvgMa.value = it }
+            }
+            viewModelScope.launch {
+                server.chargeCounter.collect { _chargeCounter.value = it }
+            }
+            viewModelScope.launch {
+                server.energyCounter.collect { _energyCounter.value = it }
+            }
+            viewModelScope.launch {
+                server.batteryStatus.collect { _batteryStatus.value = it }
             }
             viewModelScope.launch {
                 server.isAdvertising.collect { _isAdvertising.value = it }

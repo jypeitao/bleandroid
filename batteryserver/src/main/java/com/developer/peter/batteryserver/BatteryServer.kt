@@ -39,6 +39,18 @@ class BatteryServer(private val context: Context) {
     private val _currentMa = MutableStateFlow(0)
     val currentMa = _currentMa.asStateFlow()
 
+    private val _currentAvgMa = MutableStateFlow(0)
+    val currentAvgMa = _currentAvgMa.asStateFlow()
+
+    private val _chargeCounter = MutableStateFlow(0)
+    val chargeCounter = _chargeCounter.asStateFlow()
+
+    private val _energyCounter = MutableStateFlow(0L)
+    val energyCounter = _energyCounter.asStateFlow()
+
+    private val _batteryStatus = MutableStateFlow(BatteryManager.BATTERY_STATUS_UNKNOWN)
+    val batteryStatus = _batteryStatus.asStateFlow()
+
     private val serverScope = CoroutineScope(Dispatchers.IO + Job())
     private var batteryMonitorJob: Job? = null
     
@@ -140,17 +152,25 @@ class BatteryServer(private val context: Context) {
                     0
                 }
 
-                // 获取电流（如果有）
+                // 获取更多电流和电池信息
                 val batteryManager = context?.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-                val currentNowMicro = batteryManager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: 0L
-                val currentNowMa = (currentNowMicro / 1000).toInt()
+                if (batteryManager != null) {
+                    val currentNowMa = (batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) / 1000).toInt()
+                    val currentAvgMa = (batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE) / 1000).toInt()
+                    val chargeCounter = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
+                    val energyCounter = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
+                    val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN)
 
-                Log.d(TAG, "Battery Changed: $batteryPct%, Current: $currentNowMa mA")
+                    Log.d(TAG, "Battery Changed: $batteryPct%, Current: $currentNowMa mA, Avg: $currentAvgMa mA, Charge: $chargeCounter, Energy: $energyCounter, Status: $status")
 
-                if (currentNowMa != _currentMa.value || batteryPct != _currentBatteryLevel.value) {
                     _currentMa.value = currentNowMa
+                    _currentAvgMa.value = currentAvgMa
+                    _chargeCounter.value = chargeCounter
+                    _energyCounter.value = energyCounter
+                    _batteryStatus.value = status
                     _currentBatteryLevel.value = batteryPct
-                    updateCharacteristic(currentNowMa)
+                    
+                    updateCharacteristics(currentNowMa, currentAvgMa, chargeCounter, energyCounter, status)
                 }
             }
         }
@@ -216,13 +236,45 @@ class BatteryServer(private val context: Context) {
             BluetoothGattCharacteristic.PERMISSION_READ
         )
 
+        val currentAvgChar = BluetoothGattCharacteristic(
+            BleServiceConstants.BATTERY_CURRENT_AVG_UUID,
+            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_READ
+        )
+
+        val chargeCounterChar = BluetoothGattCharacteristic(
+            BleServiceConstants.BATTERY_CHARGE_COUNTER_UUID,
+            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_READ
+        )
+
+        val energyCounterChar = BluetoothGattCharacteristic(
+            BleServiceConstants.BATTERY_ENERGY_COUNTER_UUID,
+            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_READ
+        )
+
+        val batteryStatusChar = BluetoothGattCharacteristic(
+            BleServiceConstants.BATTERY_STATUS_UUID,
+            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_READ
+        )
+
         val cccDescriptor = BluetoothGattDescriptor(
             BleServiceConstants.CCC_DESCRIPTOR_UUID,
             BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
         )
         batteryLevelChar.addDescriptor(cccDescriptor)
+        currentAvgChar.addDescriptor(BluetoothGattDescriptor(BleServiceConstants.CCC_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
+        chargeCounterChar.addDescriptor(BluetoothGattDescriptor(BleServiceConstants.CCC_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
+        energyCounterChar.addDescriptor(BluetoothGattDescriptor(BleServiceConstants.CCC_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
+        batteryStatusChar.addDescriptor(BluetoothGattDescriptor(BleServiceConstants.CCC_DESCRIPTOR_UUID, BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
 
         batteryService.addCharacteristic(batteryLevelChar)
+        batteryService.addCharacteristic(currentAvgChar)
+        batteryService.addCharacteristic(chargeCounterChar)
+        batteryService.addCharacteristic(energyCounterChar)
+        batteryService.addCharacteristic(batteryStatusChar)
         gattServer?.addService(batteryService)
     }
 
@@ -247,30 +299,72 @@ class BatteryServer(private val context: Context) {
     private fun startBatteryMonitoring() {
         // Now using batteryReceiver for updates, but we can still perform an initial check
         val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        val currentNowMicro = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-        val currentNowMa = (currentNowMicro / 1000).toInt()
+        val currentNowMa = (batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) / 1000).toInt()
+        val currentAvgMa = (batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE) / 1000).toInt()
+        val chargeCounter = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
+        val energyCounter = batteryManager.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
         val level = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        
+        // Note: Initial status is hard to get without intent, we can use unknown or try to get from battery manager if possible
+        val status = BatteryManager.BATTERY_STATUS_UNKNOWN
 
         _currentMa.value = currentNowMa
+        _currentAvgMa.value = currentAvgMa
+        _chargeCounter.value = chargeCounter
+        _energyCounter.value = energyCounter
+        _batteryStatus.value = status
         _currentBatteryLevel.value = level
-        updateCharacteristic(currentNowMa)
+        
+        updateCharacteristics(currentNowMa, currentAvgMa, chargeCounter, energyCounter, status)
         
         Log.d(TAG, "Initial battery state: $level%, $currentNowMa mA")
     }
 
     @SuppressLint("MissingPermission")
-    private fun updateCharacteristic(currentMa: Int) {
+    private fun updateCharacteristics(currentNow: Int, currentAvg: Int, chargeCounter: Int, energyCounter: Long, status: Int) {
         val service = gattServer?.getService(BleServiceConstants.BATTERY_SERVICE_UUID) ?: return
-        val characteristic = service.getCharacteristic(BleServiceConstants.BATTERY_LEVEL_UUID) ?: return
         
-        // We pack currentMa as a 4-byte integer in the characteristic value
-        val value = ByteBuffer.allocate(4).putInt(currentMa).array()
-        characteristic.value = value
-        
+        val nowChar = service.getCharacteristic(BleServiceConstants.BATTERY_LEVEL_UUID)
+        if (nowChar != null) {
+            val value = ByteBuffer.allocate(4).putInt(currentNow).array()
+            nowChar.value = value
+            notifySubscribers(nowChar)
+        }
+
+        val avgChar = service.getCharacteristic(BleServiceConstants.BATTERY_CURRENT_AVG_UUID)
+        if (avgChar != null) {
+            val value = ByteBuffer.allocate(4).putInt(currentAvg).array()
+            avgChar.value = value
+            notifySubscribers(avgChar)
+        }
+
+        val chargeChar = service.getCharacteristic(BleServiceConstants.BATTERY_CHARGE_COUNTER_UUID)
+        if (chargeChar != null) {
+            val value = ByteBuffer.allocate(4).putInt(chargeCounter).array()
+            chargeChar.value = value
+            notifySubscribers(chargeChar)
+        }
+
+        val energyChar = service.getCharacteristic(BleServiceConstants.BATTERY_ENERGY_COUNTER_UUID)
+        if (energyChar != null) {
+            val value = ByteBuffer.allocate(8).putLong(energyCounter).array()
+            energyChar.value = value
+            notifySubscribers(energyChar)
+        }
+
+        val statusChar = service.getCharacteristic(BleServiceConstants.BATTERY_STATUS_UUID)
+        if (statusChar != null) {
+            val value = ByteBuffer.allocate(4).putInt(status).array()
+            statusChar.value = value
+            notifySubscribers(statusChar)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun notifySubscribers(characteristic: BluetoothGattCharacteristic) {
         for (device in subscribedDevices) {
             gattServer?.notifyCharacteristicChanged(device, characteristic, false)
         }
-        Log.d(TAG, "Updated characteristic with current: $currentMa mA, notified ${subscribedDevices.size} devices")
     }
 
     @SuppressLint("MissingPermission")

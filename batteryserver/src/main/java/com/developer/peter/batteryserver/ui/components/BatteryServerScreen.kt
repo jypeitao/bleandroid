@@ -16,6 +16,10 @@ fun BatteryServerScreen(
     connectionState: ConnectionState,
     currentBatteryLevel: Int,
     currentMa: Int,
+    currentAvgMa: Int,
+    chargeCounter: Int,
+    energyCounter: Long,
+    batteryStatus: Int,
     onToggleServer: () -> Unit
 ) {
     Column(
@@ -77,14 +81,28 @@ fun BatteryServerScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "Current", style = MaterialTheme.typography.labelLarge)
-                        Text(text = "$currentMa mA", fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "Level", style = MaterialTheme.typography.labelLarge)
-                        Text(text = "$currentBatteryLevel %", fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
-                    }
+                    BatteryDataColumn("Current", "$currentMa mA")
+                    BatteryDataColumn("Level", "$currentBatteryLevel %")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    BatteryDataColumn("Avg Current", "$currentAvgMa mA")
+                    BatteryDataColumn("Charge Counter", "$chargeCounter")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    BatteryDataColumn("Energy Counter", "$energyCounter")
+                    BatteryDataColumn("Status", formatStatus(batteryStatus))
                 }
             }
         }
@@ -100,5 +118,24 @@ fun BatteryServerScreen(
         ) {
             Text(text = if (isAdvertising) "Stop Battery Service" else "Start Battery Service")
         }
+    }
+}
+
+@Composable
+fun BatteryDataColumn(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(120.dp)) {
+        Text(text = label, style = MaterialTheme.typography.labelLarge)
+        Text(text = value, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+fun formatStatus(status: Int): String {
+    return when (status) {
+        android.os.BatteryManager.BATTERY_STATUS_CHARGING -> "Charging"
+        android.os.BatteryManager.BATTERY_STATUS_DISCHARGING -> "Discharging"
+        android.os.BatteryManager.BATTERY_STATUS_FULL -> "Full"
+        android.os.BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "Not Charging"
+        android.os.BatteryManager.BATTERY_STATUS_UNKNOWN -> "Unknown"
+        else -> "Unknown"
     }
 }
