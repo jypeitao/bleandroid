@@ -21,6 +21,7 @@ fun CurrentDisplayScreen(viewModel: MainViewModel) {
     val batteryPct by viewModel.currentBatteryLevel.collectAsState()
     val currentHistory by viewModel.currentHistory.collectAsState()
     val lastPercentChangeTime by viewModel.lastPercentChangeTime.collectAsState()
+    val batteryCapacity by viewModel.batteryCapacity.collectAsState()
 
     Column(
         modifier = Modifier
@@ -47,13 +48,25 @@ fun CurrentDisplayScreen(viewModel: MainViewModel) {
         )
         Text(text = "当前电量", fontSize = 16.sp, color = Color.Gray)
 
-        if (lastPercentChangeTime > 0) {
-            Text(
-                text = "电量变化 1% 用时: ${formatTime(lastPercentChangeTime)}",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.padding(top = 8.dp)
-            )
+        if (lastPercentChangeTime > 0 || batteryCapacity > 0) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (batteryCapacity > 0) {
+                    Text(
+                        text = "电池总容量: ${batteryCapacity.toInt()} mAh",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                if (lastPercentChangeTime > 0) {
+                    Text(
+                        text = "电量变化 1% 用时: ${formatTime(lastPercentChangeTime)}",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))

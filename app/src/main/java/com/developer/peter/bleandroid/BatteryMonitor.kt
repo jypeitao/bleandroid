@@ -25,6 +25,9 @@ class BatteryMonitor(private val context: Context) {
     private val _lastPercentChangeTime = MutableStateFlow(0L) // In seconds
     val lastPercentChangeTime = _lastPercentChangeTime.asStateFlow()
 
+    private val _batteryCapacity = MutableStateFlow(0.0) // In mAh
+    val batteryCapacity = _batteryCapacity.asStateFlow()
+
     private var lastLevel: Int = -1
     private var lastLevelTime: Long = 0L
 
@@ -45,6 +48,24 @@ class BatteryMonitor(private val context: Context) {
         // Initial check
         val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         intent?.let { updateBatteryInfo(it) }
+        
+        // Try to get total capacity
+        _batteryCapacity.value = getBatteryCapacity()
+    }
+
+    private fun getBatteryCapacity(): Double {
+        val powerProfileClass = "com.android.internal.os.PowerProfile"
+        return try {
+            val powerProfile = Class.forName(powerProfileClass)
+                .getConstructor(Context::class.java)
+                .newInstance(context)
+            val capacity = Class.forName(powerProfileClass)
+                .getMethod("getBatteryCapacity")
+                .invoke(powerProfile) as Double
+            capacity
+        } catch (e: Exception) {
+            0.0
+        }
     }
 
     fun startMonitoring() {
