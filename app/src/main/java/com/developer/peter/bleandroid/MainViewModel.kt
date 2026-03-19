@@ -12,6 +12,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val currentAvgMa = batteryMonitor.currentAvgMa
     val currentHistory = batteryMonitor.currentHistory
     val lastPercentChangeTime = batteryMonitor.lastPercentChangeTime
+    val batteryCapacity = batteryMonitor.batteryCapacity
 
     init {
         batteryMonitor.startMonitoring()
