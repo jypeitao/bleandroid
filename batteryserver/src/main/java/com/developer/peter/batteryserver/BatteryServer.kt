@@ -51,11 +51,19 @@ class BatteryServer(private val context: Context) {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             Log.d(TAG, "onConnectionStateChange: $device, status: $status, newState: $newState")
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-                _connectionState.value = ConnectionState.Connected(device.address)
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                _connectionState.value = ConnectionState.Disconnected
-                subscribedDevices.remove(device)
+            when (newState) {
+                BluetoothProfile.STATE_CONNECTED -> {
+                    // 有设备连接时停止广播
+                    stopAdvertisingInternal()
+                    _connectionState.value = ConnectionState.Connected(device.address)
+                }
+                BluetoothProfile.STATE_DISCONNECTED -> {
+                    Log.d(TAG, "Disconnected from ${device.address}")
+                    _connectionState.value = ConnectionState.Disconnected
+                    subscribedDevices.remove(device)
+                    // 断开连接后重新开始广播
+                    startAdvertising()
+                }
             }
         }
 
@@ -195,7 +203,7 @@ class BatteryServer(private val context: Context) {
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setConnectable(true)
             .setTimeout(0)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
             .build()
 
         val data = AdvertiseData.Builder()
@@ -243,10 +251,8 @@ class BatteryServer(private val context: Context) {
         Log.d(TAG, "Updated characteristic with current: $currentMa mA, notified ${subscribedDevices.size} devices")
     }
 
-    private fun stopServerInternal() {
-        batteryMonitorJob?.cancel()
-        batteryMonitorJob = null
-        
+    @SuppressLint("MissingPermission")
+    private fun stopAdvertisingInternal() {
         try {
             advertiser?.stopAdvertising(advertisingCallback)
         } catch (e: Exception) {
@@ -254,8 +260,20 @@ class BatteryServer(private val context: Context) {
         }
         advertiser = null
         _isAdvertising.value = false
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun stopServerInternal() {
+        batteryMonitorJob?.cancel()
+        batteryMonitorJob = null
         
-        gattServer?.close()
+        stopAdvertisingInternal()
+        
+        try {
+            gattServer?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing gattServer", e)
+        }
         gattServer = null
         
         subscribedDevices.clear()
