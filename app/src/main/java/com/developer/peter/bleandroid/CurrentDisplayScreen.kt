@@ -2,6 +2,8 @@ package com.developer.peter.bleandroid
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -9,9 +11,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.res.Configuration
 import kotlin.math.abs
 
 @Composable
@@ -23,30 +27,35 @@ fun CurrentDisplayScreen(viewModel: MainViewModel) {
     val lastPercentChangeTime by viewModel.lastPercentChangeTime.collectAsState()
     val batteryCapacity by viewModel.batteryCapacity.collectAsState()
 
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(scrollState)
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = if (isLandscape) Arrangement.Top else Arrangement.Center
     ) {
         Text(
             text = "电流监控",
-            fontSize = 28.sp,
+            fontSize = if (isLandscape) 20.sp else 28.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(if (isLandscape) 8.dp else 20.dp))
 
         // 电池百分比大显示
         Text(
             text = "$batteryPct%",
-            fontSize = 72.sp,
+            fontSize = if (isLandscape) 48.sp else 72.sp,
             fontWeight = FontWeight.ExtraBold,
             color = if (batteryPct > 20) Color(0xFF4CAF50) else Color(0xFFF44336)
         )
-        Text(text = "当前电量", fontSize = 16.sp, color = Color.Gray)
+        Text(text = "当前电量", fontSize = if (isLandscape) 14.sp else 16.sp, color = Color.Gray)
 
         if (lastPercentChangeTime > 0 || batteryCapacity > 0) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -69,18 +78,18 @@ fun CurrentDisplayScreen(viewModel: MainViewModel) {
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(if (isLandscape) 8.dp else 20.dp))
 
         // 电流曲线图
         CurrentChart(
             history = currentHistory,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(150.dp)
-                .padding(vertical = 16.dp)
+                .height(if (isLandscape) 120.dp else 150.dp)
+                .padding(vertical = if (isLandscape) 8.dp else 16.dp)
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(if (isLandscape) 8.dp else 20.dp))
 
         // 电流信息卡片
         Card(
@@ -90,12 +99,12 @@ fun CurrentDisplayScreen(viewModel: MainViewModel) {
         ) {
             Row(
                 modifier = Modifier
-                    .padding(24.dp)
+                    .padding(if (isLandscape) 12.dp else 24.dp)
                     .fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 InfoColumn(label = "实时电流", value = "$currentMa mA")
-                VerticalDivider(modifier = Modifier.height(40.dp).width(1.dp), color = Color.Gray.copy(alpha = 0.5f))
+                VerticalDivider(modifier = Modifier.height(if (isLandscape) 30.dp else 40.dp).width(1.dp), color = Color.Gray.copy(alpha = 0.5f))
                 InfoColumn(label = "平均电流", value = "$currentAvgMa mA")
             }
         }
