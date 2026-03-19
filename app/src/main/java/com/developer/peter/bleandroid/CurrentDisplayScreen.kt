@@ -26,7 +26,8 @@ fun CurrentDisplayScreen(viewModel: MainViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = "电流监控",
@@ -91,27 +92,47 @@ fun CurrentDisplayScreen(viewModel: MainViewModel) {
 @Composable
 fun CurrentChart(history: List<Int>, modifier: Modifier = Modifier) {
     val primaryColor = MaterialTheme.colorScheme.primary
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
     
     Box(modifier = modifier) {
         if (history.size > 1) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val maxVal = history.maxOfOrNull { abs(it) }?.coerceAtLeast(100)?.toFloat() ?: 1000f
-                val minVal = history.minOfOrNull { it }?.toFloat() ?: -1000f
+                val maxValRaw = history.maxOfOrNull { it }?.toFloat() ?: 0f
+                val minValRaw = history.minOfOrNull { it }?.toFloat() ?: 0f
                 
-                // Adjust max/min to show range
-                val range = (maxVal - minVal).coerceAtLeast(100f)
-                val padding = range * 0.1f
-                val displayMax = maxVal + padding
-                val displayMin = minVal - padding
+                // Adjust range to include 0 and have some padding
+                val displayMax = maxValRaw.coerceAtLeast(100f) + 50f
+                val displayMin = minValRaw.coerceAtMost(-100f) - 50f
                 val displayRange = displayMax - displayMin
 
                 val width = size.width
                 val height = size.height
-                val stepX = width / (history.size - 1)
+                
+                // Left padding for labels
+                val chartPaddingLeft = 40.dp.toPx()
+                val chartWidth = width - chartPaddingLeft
+                val stepX = chartWidth / (history.size - 1)
 
+                // Draw horizontal grid lines and labels
+                val gridLines = listOf(displayMax, (displayMax + displayMin) / 2, displayMin, 0f)
+                gridLines.distinct().forEach { value ->
+                    if (value in displayMin..displayMax) {
+                        val y = height - ((value - displayMin) / displayRange * height)
+                        
+                        // Reference line
+                        drawLine(
+                            color = if (value == 0f) labelColor.copy(alpha = 0.5f) else labelColor.copy(alpha = 0.1f),
+                            start = androidx.compose.ui.geometry.Offset(chartPaddingLeft, y),
+                            end = androidx.compose.ui.geometry.Offset(width, y),
+                            strokeWidth = if (value == 0f) 1.dp.toPx() else 0.5.dp.toPx()
+                        )
+                    }
+                }
+
+                // Draw the curve
                 val path = Path()
                 history.forEachIndexed { index, value ->
-                    val x = index * stepX
+                    val x = chartPaddingLeft + index * stepX
                     val y = height - ((value - displayMin) / displayRange * height)
                     if (index == 0) {
                         path.moveTo(x, y)
@@ -125,6 +146,21 @@ fun CurrentChart(history: List<Int>, modifier: Modifier = Modifier) {
                     color = primaryColor,
                     style = Stroke(width = 2.dp.toPx())
                 )
+            }
+            
+            // Labels (using overlay to avoid complex TextMeasurer in Canvas for now)
+            Column(
+                modifier = Modifier.fillMaxHeight().width(40.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                val maxValRaw = history.maxOfOrNull { it } ?: 0
+                val minValRaw = history.minOfOrNull { it } ?: 0
+                val displayMax = maxValRaw.coerceAtLeast(100) + 50
+                val displayMin = minValRaw.coerceAtMost(-100) - 50
+                
+                Text(text = "${displayMax}", fontSize = 10.sp, color = labelColor)
+                Text(text = "${(displayMax + displayMin) / 2}", fontSize = 10.sp, color = labelColor)
+                Text(text = "${displayMin}", fontSize = 10.sp, color = labelColor)
             }
         } else {
             Text(
