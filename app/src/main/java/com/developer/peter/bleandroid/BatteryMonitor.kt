@@ -19,6 +19,9 @@ class BatteryMonitor(private val context: Context) {
     private val _currentAvgMa = MutableStateFlow(0)
     val currentAvgMa = _currentAvgMa.asStateFlow()
 
+    private val _calculatedAvgMa = MutableStateFlow(0)
+    val calculatedAvgMa = _calculatedAvgMa.asStateFlow()
+
     private val _currentHistory = MutableStateFlow<List<Int>>(emptyList())
     val currentHistory = _currentHistory.asStateFlow()
 
@@ -107,6 +110,11 @@ class BatteryMonitor(private val context: Context) {
             history.removeAt(0)
         }
         _currentHistory.value = history
+        
+        // Calculate average from history
+        if (history.isNotEmpty()) {
+            _calculatedAvgMa.value = history.average().toInt()
+        }
     }
 
     private fun updateBatteryInfo(intent: Intent) {
