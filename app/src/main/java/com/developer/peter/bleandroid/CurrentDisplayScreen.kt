@@ -22,6 +22,7 @@ import kotlin.math.abs
 fun CurrentDisplayScreen(viewModel: MainViewModel) {
     val currentMa by viewModel.currentMa.collectAsState()
     val currentAvgMa by viewModel.currentAvgMa.collectAsState()
+    val calculatedAvgMa by viewModel.calculatedAvgMa.collectAsState()
     val batteryPct by viewModel.currentBatteryLevel.collectAsState()
     val currentHistory by viewModel.currentHistory.collectAsState()
     val lastPercentChangeTime by viewModel.lastPercentChangeTime.collectAsState()
@@ -106,6 +107,8 @@ fun CurrentDisplayScreen(viewModel: MainViewModel) {
                 InfoColumn(label = "实时电流", value = "$currentMa mA")
                 VerticalDivider(modifier = Modifier.height(if (isLandscape) 30.dp else 40.dp).width(1.dp), color = Color.Gray.copy(alpha = 0.5f))
                 InfoColumn(label = "平均电流", value = "$currentAvgMa mA")
+                VerticalDivider(modifier = Modifier.height(if (isLandscape) 30.dp else 40.dp).width(1.dp), color = Color.Gray.copy(alpha = 0.5f))
+                InfoColumn(label = "统计平均", value = "$calculatedAvgMa mA")
             }
         }
     }
